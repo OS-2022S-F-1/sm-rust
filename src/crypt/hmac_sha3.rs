@@ -41,8 +41,8 @@ impl HmacSha3Ctx {
     }
 
     pub fn finalize(&mut self, hash: &mut [u8]) {
-        let mut temp_key: [u8; SHA3_512_BLOCK_LEN] = [0; u8];
-        let mut inner_hash: [u8; SHA3_512_HASH_LEN] = [0; u8];
+        let mut temp_key: [u8; SHA3_512_BLOCK_LEN] = [0; SHA3_512_BLOCK_LEN];
+        let mut inner_hash: [u8; SHA3_512_HASH_LEN] = [0; SHA3_512_HASH_LEN];
         self.sha3_ctx.finalize(&mut inner_hash);
         temp_key.iter_mut().zip(self.key.iter())
             .for_each(|(dst, src)| {*dst = *src ^ 0x5c; });

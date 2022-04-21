@@ -1,20 +1,20 @@
 use crate::crypt::ed25519::precomp_data::{BASE, BI};
-use super::fe::Fe;
+use super::fe::{Fe, D2};
 
-struct GeP2 {
+pub struct GeP2 {
     pub x: Fe,
     pub y: Fe,
     pub z: Fe
 }
 
-struct GeP3 {
+pub struct GeP3 {
     pub x: Fe,
     pub y: Fe,
     pub z: Fe,
     pub t: Fe
 }
 
-struct GeP1P1 {
+pub struct GeP1P1 {
     pub x: Fe,
     pub y: Fe,
     pub z: Fe,
@@ -27,7 +27,7 @@ pub struct GePrecomp {
     pub xy2d: Fe
 }
 
-struct GeCache {
+pub struct GeCache {
     pub yplusx: Fe,
     pub yminusx: Fe,
     pub z: Fe,
@@ -46,7 +46,7 @@ impl From<GeP1P1> for GeP2 {
 }
 
 impl From<GeP3> for GeP2 {
-    fn from(p: GeP1P1) -> Self {
+    fn from(p: GeP3) -> Self {
         Self {
             x: Fe::mul(&p.x, &p.x),
             y: Fe::mul(&p.y, &p.y),
@@ -74,7 +74,7 @@ impl From<GeP3> for GeCache {
             yplusx: Fe::add(&p.y, &p.x),
             yminusx: Fe::sub(&p.y, &p.x),
             z: p.z.clone(),
-            t2d: Fe::mul(&p.2, &Fe::D2)
+            t2d: Fe::mul(&p.t, &D2)
         }
     }
 }
@@ -93,9 +93,9 @@ impl From<GeP3> for [u8; 32] {
 impl From<[[i32; 10]; 3]> for GePrecomp {
     fn from(x: [[i32; 10]; 3]) -> Self {
         Self {
-            yplusx: Fe(x[0] as [u32; 10]),
-            yminusx: Fe(x[1] as [u32; 10]),
-            xy2d: Fe(x[2] as [u32; 10])
+            yplusx: x[0].into(),
+            yminusx: x[1].into(),
+            xy2d: x[2].into()
         }
     }
 }
@@ -109,6 +109,36 @@ impl From<GeP2> for [u8; 32] {
         s[31] ^= x.is_neg() << 7;
         s
     }
+}
+
+impl Clone for GeP3 {
+    fn clone(&self) -> Self {
+        Self {
+            x: self.x.clone(),
+            y: self.y.clone(),
+            z: self.z.clone(),
+            t: self.t.clone()
+        }
+    }
+}
+
+impl Clone for GeCache {
+    fn clone(&self) -> Self {
+        Self {
+            yplusx: self.yplusx.clone(),
+            yminusx: self.yminusx.clone(),
+            z: self.z.clone(),
+            t2d: self.t2d.clone()
+        }
+    }
+}
+
+impl Copy for GeCache {
+
+}
+
+impl Copy for GeP3 {
+
 }
 
 impl GeP2 {
@@ -154,10 +184,10 @@ impl GeCache {
     }
 }
 
-fn slide(r: &mut [u8], a: &[u8]) {
+pub fn slide(r: &mut [i8], a: &[u8]) {
 
     for i in 0..256 {
-        r[i] = 1 & (a[i >> 3] >> (i & 7));
+        r[i] = (1 & (a[i >> 3] >> (i & 7))) as i8;
     }
 
     for i in 0..256 {
@@ -226,7 +256,6 @@ pub fn madd(p: &GeP3, q: &GePrecomp) -> GeP1P1  {
         r.z = Fe::mul(&r.x, &q.yplusx);
         r.y = Fe::mul(&r.y, &q.yminusx);
         r.t = Fe::mul(&q.xy2d, &p.t);
-        r.x = Fe::mul(&p.z, &q.z);
         let t0 = Fe::add(&p.z, &p.z);
         r.x = Fe::sub(&r.z, &r.y);
         r.y = Fe::add(&r.z, &r.y);
@@ -247,7 +276,6 @@ pub fn msub(p: &GeP3, q: &GePrecomp) -> GeP1P1  {
     r.z = Fe::mul(&r.x, &q.yminusx);
     r.y = Fe::mul(&r.y, &q.yplusx);
     r.t = Fe::mul(&q.xy2d, &p.t);
-    r.x = Fe::mul(&p.z, &q.z);
     let t0 = Fe::add(&p.z, &p.z);
     r.x = Fe::sub(&r.z, &r.y);
     r.y = Fe::add(&r.z, &r.y);
@@ -272,7 +300,7 @@ pub fn p2_dbl(p: &GeP2) -> GeP1P1 {
 }
 
 pub fn p3_dbl(p: &GeP3) -> GeP1P1 {
-    let q: GeP2 = p.into();
+    let q: GeP2 = (*p).into();
     p2_dbl(&q)
 }
 
@@ -297,8 +325,8 @@ impl GePrecomp {
 
     pub fn new(pos: usize, b: u8) -> Self {
         let flag = (b as i8) < 0;
-        let babs = b - (((-(flag as u8)) & b) << 1);
-        let mut r = match babs {
+        let babs = b - (((-(flag as i8)) as u8 & b) << 1);
+        let r = match babs {
             1 => BASE[pos][0].clone(),
             2 => BASE[pos][1].clone(),
             3 => BASE[pos][2].clone(),
@@ -327,10 +355,10 @@ impl GePrecomp {
 
 
 pub fn scalarmult_base(a: &[u8]) -> GeP3 {
-    let mut e: [u8; 64] = [0; 64];
+    let mut e: [i8; 64] = [0; 64];
     for i in 0..32 {
-        e[2 * i + 0] = (a[i] >> 0) & 15;
-        e[2 * i + 1] = (a[i] >> 4) & 15;
+        e[2 * i + 0] = ((a[i] >> 0) & 15) as i8;
+        e[2 * i + 1] = ((a[i] >> 4) & 15) as i8;
     }
 
     let mut carry = 0;
@@ -343,96 +371,89 @@ pub fn scalarmult_base(a: &[u8]) -> GeP3 {
     }
     e[63] += carry;
     let mut h = GeP3::new();
-    let mut r = GeP1P1::new();
-    let mut s = GeP2::new();
-    let mut t = GePrecomp {
-        yplusx: Fe::new(),
-        yminusx: Fe::new(),
-        xy2d: Fe::new()
-    };
     for i in 0..32 {
-        t = GePrecomp::new(i, e[2 * i + 1]);
-        r = madd(&h, &t);
+        let t = GePrecomp::new(i, e[2 * i + 1] as u8);
+        let r = madd(&h, &t);
         h = r.into();
     }
 
-    r = p3_dbl(&h);
-    s = r.into();
-    r = p2_dbl(&s);
-    s = r.into();
-    r = p2_dbl(&s);
-    s = r.into();
-    r = p2_dbl(&s);
+    let r = p3_dbl(&h);
+    let s = r.into();
+    let r = p2_dbl(&s);
+    let s = r.into();
+    let r = p2_dbl(&s);
+    let s = r.into();
+    let r = p2_dbl(&s);
     h = r.into();
 
     for i in 0..32 {
-        t = GePrecomp::new(i, e[2 * i]);
-        r = madd(&h, &t);
+        let t = GePrecomp::new(i, e[2 * i] as u8);
+        let r = madd(&h, &t);
         h = r.into();
     }
     h
 }
 
-pub fn double_scalarmult_vartime(a: &[u8], A: &GeP3, b: &[u8]) -> GeP2 {
-    let mut aslide: [u8; 256] = [0; 256];
-    let mut bslide: [u8; 256] = [0; 256];
-    let mut Ai: [GeCache; 8] = [GeCache::new(); 8];
-    slide(&aslide, &a);
-    slide(&bslide, &b);
-    Ai[0] = A.into();
-    let mut t = p3_dbl(&A);
-    let mut A2: GeP3 = t.into();
-    t = add(&A2, &Ai[0]);
+pub fn double_scalarmult_vartime(a: &[u8], a_gep3: &GeP3, b: &[u8]) -> GeP2 {
+    let mut aslide: [i8; 256] = [0; 256];
+    let mut bslide: [i8; 256] = [0; 256];
+    let mut ai: [GeCache; 8] = [GeCache::new(); 8];
+    slide(&mut aslide, &a);
+    slide(&mut bslide, &b);
+    ai[0] = (*a_gep3).into();
+    let mut t = p3_dbl(&a_gep3);
+    let a2: GeP3 = t.into();
+    t = add(&a2, &ai[0]);
     let mut u: GeP3 = t.into();
-    Ai[1] = u.into();
+    ai[1] = u.into();
 
-    t = add(&A2, &Ai[1]);
+    t = add(&a2, &ai[1]);
     u = t.into();
-    Ai[2] = u.into();
+    ai[2] = u.into();
 
-    t = add(&A2, &Ai[2]);
+    t = add(&a2, &ai[2]);
     u = t.into();
-    Ai[3] = u.into();
+    ai[3] = u.into();
 
-    t = add(&A2, &Ai[3]);
+    t = add(&a2, &ai[3]);
     u = t.into();
-    Ai[4] = u.into();
+    ai[4] = u.into();
 
-    t = add(&A2, &Ai[4]);
+    t = add(&a2, &ai[4]);
     u = t.into();
-    Ai[5] = u.into();
+    ai[5] = u.into();
 
-    t = add(&A2, &Ai[5]);
+    t = add(&a2, &ai[5]);
     u = t.into();
-    Ai[6] = u.into();
+    ai[6] = u.into();
 
-    t = add(&A2, &Ai[6]);
+    t = add(&a2, &ai[6]);
     u = t.into();
-    Ai[7] = u.into();
+    ai[7] = u.into();
     let mut r = GeP2::new();
     let mut i = 255;
-    while i >= 0 {
+    while i as isize >= 0 {
         if aslide[i] > 0 || bslide[i] > 0 {
             break;
         }
         i -= 1;
     }
-    while i >= 0 {
+    while i as isize >= 0 {
         t = p2_dbl(&r);
         if aslide[i] > 0 {
             u = t.into();
-            t = add(&u, &Ai[aslide[i] / 2]);
+            t = add(&u, &ai[(aslide[i] / 2) as usize]);
         } else if aslide[i] < 0 {
             u = t.into();
-            t = sub(&u, &Ai[-aslide[i] / 2]);
+            t = sub(&u, &ai[(-aslide[i] / 2) as usize]);
         }
 
         if bslide[i] > 0 {
             u = t.into();
-            t = madd(&u, &BI[bslide[i] / 2]);
+            t = madd(&u, &BI[(bslide[i] / 2) as usize]);
         } else if bslide[i] < 0 {
             u = t.into();
-            t = msub(&u, &BI[-bslide[i] / 2]);
+            t = msub(&u, &BI[(-bslide[i] / 2) as usize]);
         }
         r = t.into();
         i -= 1;

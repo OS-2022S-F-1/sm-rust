@@ -1,9 +1,27 @@
+use lazy_static::lazy_static;
 use super::{load_3, load_4};
 
 pub struct Fe(pub [u32; 10]);
 
+lazy_static! {
+    pub static ref D2: Fe = [
+        -21827239, -5839606, -30745221, 13898782, 229458,
+        15978800, -12551817, -6495438, 29715968, 9444199
+    ].into();
+}
+
+impl From<[i32; 10]> for Fe {
+    fn from(x: [i32; 10]) -> Self {
+        let mut ret: Self = Self([0; 10]);
+        for i in 0..10 {
+            ret.0[i] = x[i] as u32;
+        }
+        ret
+    }
+}
+
 impl From<Fe> for [u8; 32] {
-    fn from(x: &Fe) -> Self {
+    fn from(x: Fe) -> Self {
         let mut h = x.0.clone();
         let mut q: u32 = (19 * h[9] + (1 << 24)) >> 25;
         q = (h[0] + q) >> 26;
@@ -56,12 +74,12 @@ impl From<Fe> for [u8; 32] {
         (h[5] >> 0) as u8, (h[5] >> 8) as u8, (h[5] >> 16) as u8, ((h[5] >> 24) | (h[6] << 1)) as u8,
         (h[6] >> 7) as u8, (h[6] >> 15) as u8, ((h[6] >> 23) | (h[7] << 3)) as u8, (h[7] >> 5) as u8,
         (h[7] >> 13) as u8, ((h[7] >> 21) | (h[8] << 4)) as u8, (h[8] >> 4) as u8, (h[8] >> 12) as u8,
-        ((h[8] >> 20) | (h[9] << 6)) as u8, (h[9] >> 2) as u8, (h[9] >> 10) as u8, (h[9] >> 18)]
+        ((h[8] >> 20) | (h[9] << 6)) as u8, (h[9] >> 2) as u8, (h[9] >> 10) as u8, (h[9] >> 18) as u8]
     }
 }
 
 impl From<[u8; 32]> for Fe {
-    fn from(x: &[u8]) -> Self {
+    fn from(x: [u8; 32]) -> Self {
         let mut h = [load_4(&x[0..4]), load_3(&x[4..7]) << 6,
             load_3(&x[7..10]) << 5, load_3(&x[10..13]) << 3,
             load_3(&x[13..16]) << 2, load_4(&x[16..20]),
@@ -119,6 +137,10 @@ impl Clone for Fe {
     }
 }
 
+impl Copy for Fe {
+
+}
+
 impl Fe {
     pub fn new() -> Self {
         Self([0; 10])
@@ -128,13 +150,8 @@ impl Fe {
         Self([1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     }
 
-    pub const D2: Fe = Fe([
-        -21827239, -5839606, -30745221, 13898782, 229458, 15978800, -12551817, -6495438, 29715968, 9444199
-    ]);
-
     pub fn add(f: &Fe, g: &Fe) -> Self {
         let mut ret = Fe::new();
-        let mut overflow = false;
         for i in 0..10 {
             ret.0[i] = f.0[i] + g.0[i];
         }
@@ -143,7 +160,6 @@ impl Fe {
 
     pub fn sub(f: &Fe, g: &Fe) -> Self {
         let mut ret = Fe::new();
-        let mut overflow = false;
         for i in 0..10 {
             ret.0[i] = f.0[i] - g.0[i];
         }
@@ -161,7 +177,7 @@ impl Fe {
             for i in 0..10 {
                 let tmp = f.0[i];
                 f.0[i] = g.0[i];
-                g.0[i] = f.0[i];
+                g.0[i] = tmp;
             }
         }
     }
@@ -171,31 +187,31 @@ impl Fe {
     }
 
     pub fn is_neg(&self) -> u8 {
-        let s: [u8; 32] = self.into();
+        let s: [u8; 32] = (*self).into();
         s[0] & 1
     }
 
     pub fn mul(f: &Fe, g: &Fe) -> Self {
-        let f0 = f.0[0] as usize;
-        let f1 = f.0[1] as usize;
-        let f2 = f.0[2] as usize;
-        let f3 = f.0[3] as usize;
-        let f4 = f.0[4] as usize;
-        let f5 = f.0[5] as usize;
-        let f6 = f.0[6] as usize;
-        let f7 = f.0[7] as usize;
-        let f8 = f.0[8] as usize;
-        let f9 = f.0[9] as usize;
-        let g0 = g.0[0] as usize;
-        let g1 = g.0[1] as usize;
-        let g2 = g.0[2] as usize;
-        let g3 = g.0[3] as usize;
-        let g4 = g.0[4] as usize;
-        let g5 = g.0[5] as usize;
-        let g6 = g.0[6] as usize;
-        let g7 = g.0[7] as usize;
-        let g8 = g.0[8] as usize;
-        let g9 = g.0[9] as usize;
+        let f0 = f.0[0] as isize;
+        let f1 = f.0[1] as isize;
+        let f2 = f.0[2] as isize;
+        let f3 = f.0[3] as isize;
+        let f4 = f.0[4] as isize;
+        let f5 = f.0[5] as isize;
+        let f6 = f.0[6] as isize;
+        let f7 = f.0[7] as isize;
+        let f8 = f.0[8] as isize;
+        let f9 = f.0[9] as isize;
+        let g0 = g.0[0] as isize;
+        let g1 = g.0[1] as isize;
+        let g2 = g.0[2] as isize;
+        let g3 = g.0[3] as isize;
+        let g4 = g.0[4] as isize;
+        let g5 = g.0[5] as isize;
+        let g6 = g.0[6] as isize;
+        let g7 = g.0[7] as isize;
+        let g8 = g.0[8] as isize;
+        let g9 = g.0[9] as isize;
         let g1_19 = 19 * g1; /* 1.959375*2^29 */
         let g2_19 = 19 * g2; /* 1.959375*2^30; still ok */
         let g3_19 = 19 * g3;
@@ -367,16 +383,16 @@ impl Fe {
     }
     
     pub fn sq(f: &Fe) -> Self {
-        let f0 = f.0[0] as usize;
-        let f1 = f.0[1] as usize;
-        let f2 = f.0[2] as usize;
-        let f3 = f.0[3] as usize;
-        let f4 = f.0[4] as usize;
-        let f5 = f.0[5] as usize;
-        let f6 = f.0[6] as usize;
-        let f7 = f.0[7] as usize;
-        let f8 = f.0[8] as usize;
-        let f9 = f.0[9] as usize;
+        let f0 = f.0[0] as isize;
+        let f1 = f.0[1] as isize;
+        let f2 = f.0[2] as isize;
+        let f3 = f.0[3] as isize;
+        let f4 = f.0[4] as isize;
+        let f5 = f.0[5] as isize;
+        let f6 = f.0[6] as isize;
+        let f7 = f.0[7] as isize;
+        let f8 = f.0[8] as isize;
+        let f9 = f.0[9] as isize;
         let f0_2 = 2 * f0;
         let f1_2 = 2 * f1;
         let f2_2 = 2 * f2;
@@ -498,16 +514,16 @@ impl Fe {
     }
 
     pub fn sq2(f: &Fe) -> Self {
-        let f0 = f.0[0] as usize;
-        let f1 = f.0[1] as usize;
-        let f2 = f.0[2] as usize;
-        let f3 = f.0[3] as usize;
-        let f4 = f.0[4] as usize;
-        let f5 = f.0[5] as usize;
-        let f6 = f.0[6] as usize;
-        let f7 = f.0[7] as usize;
-        let f8 = f.0[8] as usize;
-        let f9 = f.0[9] as usize;
+        let f0 = f.0[0] as isize;
+        let f1 = f.0[1] as isize;
+        let f2 = f.0[2] as isize;
+        let f3 = f.0[3] as isize;
+        let f4 = f.0[4] as isize;
+        let f5 = f.0[5] as isize;
+        let f6 = f.0[6] as isize;
+        let f7 = f.0[7] as isize;
+        let f8 = f.0[8] as isize;
+        let f9 = f.0[9] as isize;
         let f0_2 = 2 * f0;
         let f1_2 = 2 * f1;
         let f2_2 = 2 * f2;
@@ -689,7 +705,7 @@ impl Fe {
     pub fn neg(f: &Fe) -> Self {
         let mut ret = Fe::new();
         for i in 0..10 {
-            ret.0[i] = -f.0[i];
+            ret.0[i] = (-(f.0[i] as i32)) as u32;
         }
         ret
     }

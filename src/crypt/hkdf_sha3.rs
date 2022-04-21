@@ -1,16 +1,5 @@
 use super::hmac_sha3::{hmac_sha3, HmacSha3Ctx, SHA3_512_HASH_LEN};
 
-pub fn hkdf_sha3_512(mut salt: &[u8], ikm: &[u8], info: &[u8], mut okm: &[u8]) -> isize {
-    if okm.len() > 255 * SHA3_512_HASH_LEN {
-        -1
-    } else {
-        let mut prk: [u8; SHA3_512_HASH_LEN] = [0; SHA3_512_HASH_LEN];
-        hmac_sha3(&mut salt, &ikm, &mut prk);
-        hkdf_expand(&mut prk, &info, &mut okm)
-    }
-
-}
-
 fn hkdf_expand(prk: &mut [u8], info: &[u8], okm: &mut [u8]) -> isize {
     if prk.len() < SHA3_512_HASH_LEN || okm.len() > 255 * SHA3_512_HASH_LEN {
         -1
@@ -36,5 +25,17 @@ fn hkdf_expand(prk: &mut [u8], info: &[u8], okm: &mut [u8]) -> isize {
         }
         0
     }
+}
+
+pub fn hkdf_sha3_512(salt: &mut [u8], ikm: &[u8], info: &[u8], okm: &mut [u8]) -> isize {
+    if okm.len() > 255 * SHA3_512_HASH_LEN {
+        -1
+    } else {
+        let mut prk: [u8; SHA3_512_HASH_LEN] = [0; SHA3_512_HASH_LEN];
+        hmac_sha3(salt, &ikm, prk.as_mut());
+        hkdf_expand(prk.as_mut(), &info, okm)
+    }
 
 }
+
+

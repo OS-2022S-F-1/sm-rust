@@ -45,7 +45,7 @@ fn sha3_keccakf(st: &mut [usize]) {
         for i in 0..24 {
             let j = KECCAKF_PILN[i];
             bc[0] = st[j];
-            st[j] = rotl64(t, keccakf_rotc[i]);
+            st[j] = rotl64(t, KECCAKF_ROTC[i]);
             t = bc[0];
         }
 
@@ -59,7 +59,7 @@ fn sha3_keccakf(st: &mut [usize]) {
             }
             j += 5;
         }
-        st[0] ^= keccakf_rndc[r];
+        st[0] ^= KECCAKF_RNDC[r];
     }
 }
 
@@ -69,6 +69,7 @@ pub struct Sha3Ctx {
     rsiz: usize,
     mdlen: usize
 }
+
 
 impl Sha3Ctx {
     pub fn new(mdlen: usize) -> Self {
@@ -86,8 +87,9 @@ impl Sha3Ctx {
             self.st[j] ^= item;
             j += 1;
             if j >= self.rsiz {
-                sha3_keccakf(&self.st as &[usize; 25]);
-                 //sha3_keccakf(c->st.q);
+                unsafe {
+                    sha3_keccakf(&mut *(self.st.as_ptr() as *mut [usize; 25]));
+                }
                 j = 0;
             }
         });
@@ -97,7 +99,9 @@ impl Sha3Ctx {
     pub fn finalize(&mut self, md: &mut [u8]) {
         self.st[self.pt] ^= 0x06;
         self.st[self.rsiz - 1] ^= 0x80;
-        sha3_keccakf(&self.st as &[usize; 25]);
+        unsafe {
+            sha3_keccakf(&mut *(self.st.as_ptr() as *mut [usize; 25]));
+        }
         md.iter_mut().zip(self.st.iter()).for_each(|(dst, src)| {*dst = *src; });
     }
 }

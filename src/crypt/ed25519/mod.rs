@@ -31,7 +31,7 @@ pub fn create_keypair(private_key: &mut [u8], seed: &[u8]) -> [u8; 32] {
     scalarmult_base(private_key).into()
 }
 
-pub fn sign( message: &[u8], public_key: &[u8], private_key: &[u8]) -> [u8; 64] {
+pub fn sign(message: &[u8], public_key: &[u8], private_key: &[u8]) -> [u8; 64] {
     let mut signature: [u8; 64] = [0; 64];
     let mut r: [u8; 64] = [0; 64];
     let mut hram: [u8; 64] = [0; 64];
@@ -41,8 +41,9 @@ pub fn sign( message: &[u8], public_key: &[u8], private_key: &[u8]) -> [u8; 64] 
     hash.update(message);
     hash.finalize(&mut r);
     reduce(&mut r);
-    let R = scalarmult_base(&r);
-    signature[0..32] = R.into();
+    let base = scalarmult_base(&r);
+    let signature_front: [u8; 32] = base.into();
+    signature[0..32].copy_from_slice(&signature_front);
 
     let mut hash = Sha3Ctx::new(64);
     hash.update(&signature[..32]);
