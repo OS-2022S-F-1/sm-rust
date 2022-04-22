@@ -1,5 +1,3 @@
-#![feature(unchecked_math)]
-
 // mod sm;
 // mod thread;
 // mod mprv;
@@ -17,7 +15,7 @@ fn main() {
     let mut private_key: [u8; 64] = [0; 64];
     let seed: [u8; 32] = [0; 32];
     let public_key = create_keypair(&mut private_key, &seed);
-    let message:[u8; 128] = [0; 128];
+    let message: [u8; 128] = [0; 128];
     let signature = sign(&message, &public_key, &private_key);
     let flag = verify(&signature, &message, &public_key);
     for i in 0..64 {
