@@ -1,4 +1,4 @@
-fn copy_from_sm<T>(dst: uintptr_t, src_buf: *mut T, len: size_t) -> i32 {
+pub fn copy_from_sm(dst: uintptr_t, src_buf: *mut usize, len: size_t) -> i32 {
     let src: uintptr_t = src_buf as uintptr_t;
 
     if src % REGBYTES  == 0 && dst % REGBYTES == 0 {
@@ -27,7 +27,7 @@ fn copy_from_sm<T>(dst: uintptr_t, src_buf: *mut T, len: size_t) -> i32 {
 
     while len > 0 {
         let res: i32 = copy1_from_sm(dst, src as *mut uint8_t); // mprv.s
-        if res {
+        if res != 0 {
             return res;
         }
 
@@ -39,7 +39,7 @@ fn copy_from_sm<T>(dst: uintptr_t, src_buf: *mut T, len: size_t) -> i32 {
     return 0;
 }
 
-fn copy_to_sm<T>(dst_buf: *mut T, src: uintptr_t, len: size_t) -> i32 {
+pub fn copy_to_sm(dst_buf: *mut usize, src: uintptr_t, len: size_t) -> i32 {
     let dst: uintptr_t = dst_buf as uintptr_t;
 
     if src % REGBYTES == 0 && dst % REGBYTES == 0 {
