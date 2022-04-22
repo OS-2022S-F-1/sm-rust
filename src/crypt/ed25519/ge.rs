@@ -1,5 +1,5 @@
 use crate::crypt::ed25519::precomp_data::{BASE, BI};
-use super::fe::{Fe, D2};
+use super::fe::{Fe, D2, D, SQRT_M1};
 
 pub struct GeP2 {
     pub x: Fe,
@@ -48,9 +48,9 @@ impl From<GeP1P1> for GeP2 {
 impl From<GeP3> for GeP2 {
     fn from(p: GeP3) -> Self {
         Self {
-            x: Fe::mul(&p.x, &p.x),
-            y: Fe::mul(&p.y, &p.y),
-            z: Fe::mul(&p.z, &p.z)
+            x: p.x.clone(),
+            y: p.y.clone(),
+            z: p.z.clone()
 
         }
     }
@@ -159,6 +159,44 @@ impl GeP3 {
             z: Fe::new_one(),
             t: Fe::new()
         }
+    }
+
+    pub fn frombytes_negate_vartime(s: &[u8]) -> Option<Self> {
+        let mut y: Fe = s.into();
+        let mut z = Fe::new_one();
+        let mut u = Fe::sq(&y);
+        let mut v = Fe::mul(&u, &D);
+        u = Fe::sub(&u, &z);
+        v = Fe::add(&v, &z);
+        let mut v3 = Fe::sq(&v);
+        v3 = Fe::mul(&v3, &v);
+        let mut x = Fe::sq(&v3);
+        x = Fe::mul(&x, &v);
+        x = Fe::mul(&x, &u);
+        x = Fe::pow22523(&x);
+        x = Fe::mul(&x, &v3);
+        x = Fe::mul(&x, &u);
+        let mut vxx = Fe::sq(&x);
+        vxx = Fe::mul(&vxx, &v);
+        let mut check = Fe::sub(&vxx, &u);
+        if !check.is_zero() {
+            check = Fe::add(&vxx, &u);
+            if !check.is_zero() {
+                return None;
+            }
+            x = Fe::mul(&x, &SQRT_M1)
+        }
+
+        if x.is_neg() == (s[31] >> 7) {
+            x = Fe::neg(&x);
+        }
+        let t = Fe::mul(&x, &y);
+        Some(Self {
+            x,
+            y,
+            z,
+            t
+        })
     }
 }
 
@@ -353,6 +391,10 @@ impl GePrecomp {
     }
 }
 
+fn print_fe(a: &Fe) {
+    a.0.iter().for_each(|i| {print!("{} ", i)});
+    println!();
+}
 
 pub fn scalarmult_base(a: &[u8]) -> GeP3 {
     let mut e: [i8; 64] = [0; 64];

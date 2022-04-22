@@ -25,7 +25,7 @@ fn rotl64(x: usize, y: usize) -> usize {
     (x << y) | (x >> (64 - y))
 }
 
-fn sha3_keccakf(st: &mut [usize]) {
+pub fn sha3_keccakf(st: &mut [usize]) {
     let mut bc: [usize; 5] = [0; 5];
     for r in 0..KECCAKF_ROUNDS {
         for i in 0..5 {

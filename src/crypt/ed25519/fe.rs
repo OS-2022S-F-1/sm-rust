@@ -1,20 +1,31 @@
 use lazy_static::lazy_static;
 use super::{load_3, load_4};
 
-pub struct Fe(pub [u32; 10]);
+pub struct Fe(pub [i32; 10]);
 
 lazy_static! {
     pub static ref D2: Fe = [
         -21827239, -5839606, -30745221, 13898782, 229458,
         15978800, -12551817, -6495438, 29715968, 9444199
     ].into();
+
+    pub static ref D: Fe = [
+        -10913610, 13857413, -15372611, 6949391, 114729,
+        -8787816, -6275908, -3247719, -18696448, -12055116
+    ].into();
+
+    pub static ref SQRT_M1: Fe = [
+        -32595792, -7943725, 9377950, 3500415, 12389472,
+        -272473, -25146209, -2005654, 326686, 11406482
+    ].into();
+
 }
 
 impl From<[i32; 10]> for Fe {
     fn from(x: [i32; 10]) -> Self {
         let mut ret: Self = Self([0; 10]);
         for i in 0..10 {
-            ret.0[i] = x[i] as u32;
+            ret.0[i] = x[i];
         }
         ret
     }
@@ -23,7 +34,7 @@ impl From<[i32; 10]> for Fe {
 impl From<Fe> for [u8; 32] {
     fn from(x: Fe) -> Self {
         let mut h = x.0.clone();
-        let mut q: u32 = (19 * h[9] + (1 << 24)) >> 25;
+        let mut q: i32 = (19 * h[9] + (1 << 24)) >> 25;
         q = (h[0] + q) >> 26;
         q = (h[1] + q) >> 25;
         q = (h[2] + q) >> 26;
@@ -78,13 +89,13 @@ impl From<Fe> for [u8; 32] {
     }
 }
 
-impl From<[u8; 32]> for Fe {
-    fn from(x: [u8; 32]) -> Self {
-        let mut h = [load_4(&x[0..4]), load_3(&x[4..7]) << 6,
-            load_3(&x[7..10]) << 5, load_3(&x[10..13]) << 3,
-            load_3(&x[13..16]) << 2, load_4(&x[16..20]),
-            load_3(&x[20..23]) << 7, load_3(&x[23..26]) << 5,
-            load_3(&x[26..29]) << 4, (load_3(&x[29..32]) & 8388607) << 2];
+impl From<&[u8]> for Fe {
+    fn from(x: &[u8]) -> Self {
+        let mut h: [isize; 10] = [load_4(&x[0..4]) as isize, (load_3(&x[4..7]) << 6) as isize,
+            (load_3(&x[7..10]) << 5) as isize, (load_3(&x[10..13]) << 3) as isize,
+            (load_3(&x[13..16]) << 2) as isize, load_4(&x[16..20]) as isize,
+            (load_3(&x[20..23]) << 7) as isize, (load_3(&x[23..26]) << 5) as isize,
+            (load_3(&x[26..29]) << 4) as isize, ((load_3(&x[29..32]) & 8388607) << 2) as isize];
         let carry = (h[9] + (1 << 24)) >> 25;
         h[0] += carry * 19;
         h[9] -= carry << 25;
@@ -126,8 +137,8 @@ impl From<[u8; 32]> for Fe {
         h[9] += carry;
         h[8] -= carry << 26;
 
-        Self([h[0] as u32, h[1] as u32, h[2] as u32, h[3] as u32, h[4] as u32,
-            h[5] as u32, h[6] as u32, h[7] as u32, h[8] as u32, h[9] as u32])
+        Self([h[0] as i32, h[1] as i32, h[2] as i32, h[3] as i32, h[4] as i32,
+            h[5] as i32, h[6] as i32, h[7] as i32, h[8] as i32, h[9] as i32])
     }
 }
 
@@ -189,6 +200,15 @@ impl Fe {
     pub fn is_neg(&self) -> u8 {
         let s: [u8; 32] = (*self).into();
         s[0] & 1
+    }
+
+    pub fn is_zero(&self) -> bool {
+        let s: [u8; 32] = (*self).into();
+        let mut ret = 0;
+        for i in 0..32 {
+            ret |= s[i];
+        }
+        ret == 0
     }
 
     pub fn mul(f: &Fe, g: &Fe) -> Self {
@@ -378,8 +398,8 @@ impl Fe {
         let carry= (h0 + (1 << 25)) >> 26;
         h1 += carry;
         h0 -= carry << 26;
-        Self([h0 as u32, h1 as u32, h2 as u32, h3 as u32, h4 as u32,
-            h5 as u32, h6 as u32, h7 as u32, h8 as u32, h9 as u32])
+        Self([h0 as i32, h1 as i32, h2 as i32, h3 as i32, h4 as i32,
+            h5 as i32, h6 as i32, h7 as i32, h8 as i32, h9 as i32])
     }
     
     pub fn sq(f: &Fe) -> Self {
@@ -509,8 +529,8 @@ impl Fe {
         let carry = (h0 +  (1 << 25)) >> 26;
         h1 += carry;
         h0 -= carry << 26;
-        Self([h0 as u32, h1 as u32, h2 as u32, h3 as u32, h4 as u32,
-            h5 as u32, h6 as u32, h7 as u32, h8 as u32, h9 as u32])
+        Self([h0 as i32, h1 as i32, h2 as i32, h3 as i32, h4 as i32,
+            h5 as i32, h6 as i32, h7 as i32, h8 as i32, h9 as i32])
     }
 
     pub fn sq2(f: &Fe) -> Self {
@@ -648,8 +668,8 @@ impl Fe {
         let carry = (h0 + (1 << 25)) >> 26;
         h1 += carry;
         h0 -= carry << 26;
-        Self([h0 as u32, h1 as u32, h2 as u32, h3 as u32, h4 as u32,
-            h5 as u32, h6 as u32, h7 as u32, h8 as u32, h9 as u32])
+        Self([h0 as i32, h1 as i32, h2 as i32, h3 as i32, h4 as i32,
+            h5 as i32, h6 as i32, h7 as i32, h8 as i32, h9 as i32])
     }
 
     pub fn mul121666(f: &Fe) -> Self {
@@ -698,14 +718,14 @@ impl Fe {
         h[9] += carry;
         h[8] -= carry << 26;
 
-        Self([h[0] as u32, h[1] as u32, h[2] as u32, h[3] as u32, h[4] as u32,
-            h[5] as u32, h[6] as u32, h[7] as u32, h[8] as u32, h[9] as u32])
+        Self([h[0] as i32, h[1] as i32, h[2] as i32, h[3] as i32, h[4] as i32,
+            h[5] as i32, h[6] as i32, h[7] as i32, h[8] as i32, h[9] as i32])
     }
 
     pub fn neg(f: &Fe) -> Self {
         let mut ret = Fe::new();
         for i in 0..10 {
-            ret.0[i] = (-(f.0[i] as i32)) as u32;
+            ret.0[i] = -f.0[i];
         }
         ret
     }
