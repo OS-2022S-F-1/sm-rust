@@ -14,6 +14,7 @@ use crate::crypto;
 use crate::mprv;
 use crate::sm;
 use crate::page;
+use crate::cpu;
 
 use std::mem;
 
@@ -39,7 +40,7 @@ static mut enclaves: [enclave;ENCL_MAX] = [enclave::new();ENCL_MAX];
  * INVALID is an unused index
  */
 #[derive(PartialEq)]
-enum enclave_region_type {
+pub enum enclave_region_type {
   REGION_INVALID,
   REGION_EPM,
   REGION_UTM,
@@ -57,8 +58,8 @@ enum enclave_state {
 }
 
 struct enclave_region {
-  pmp_rid: region_id,
-  region_type: enclave_region_type
+  pub pmp_rid: region_id,
+  pub region_type: enclave_region_type
 }
 
 impl enclave_region {
@@ -72,26 +73,26 @@ impl enclave_region {
 
 pub struct enclave {
   // let lock: spinlock_t, // local enclave lock. we don't need this until we have multithreaded enclave
-  eid: enclave_id, //enclave id
-  encl_satp: usize, // enclave's page table base
-  state: enclave_state, // global state of the enclave
+  pub eid: enclave_id, //enclave id
+  pub encl_satp: usize, // enclave's page table base
+  pub state: enclave_state, // global state of the enclave
 
   /* Physical memory regions associate with this enclave */
-  regions: [enclave_region; ENCLAVE_REGIONS_MAX],
+  pub regions: [enclave_region; ENCLAVE_REGIONS_MAX],
 
   /* measurement */
-  hash: [u8; crypto::MDSIZE],
-  sign: [u8; crypto::SIGNATURE_SIZE],
+  pub hash: [u8; crypto::MDSIZE],
+  pub sign: [u8; crypto::SIGNATURE_SIZE],
 
   /* parameters */
-  params: runtime_va_params_t,
-  pa_params: runtime_pa_params,
+  pub params: runtime_va_params_t,
+  pub pa_params: runtime_pa_params,
 
   /* enclave execution context */
-  n_thread: usize,
-  threads: [thread_state; MAX_ENCL_THREADS], // thread.rs
+  pub n_thread: usize,
+  pub threads: [thread_state; MAX_ENCL_THREADS], // thread.rs
 
-  ped: platform_enclave_data // platform.rs
+  pub ped: platform_enclave_data // platform.rs
 }
 
 impl enclave {
@@ -125,7 +126,7 @@ struct sm_report {
   signature: [u8; crypto::SIGNATURE_SIZE]
 }
 
-struct report {
+pub struct report {
   enclave: enclave_report,
   sm: sm_report,
   dev_public_key: [u8; crypto::PUBLIC_KEY_SIZE]
@@ -137,15 +138,17 @@ struct sealing_key {
 }
 
 pub fn copy_enclave_create_args(src: usize, dest: &mut keystone_sbi_create) -> usize {
-  let region_overlap: i32 = copy_to_sm(dest, src, mem::size_of::<keystone_sbi_create>()); // mprv.rs
+  unsafe {
+    let dst: usize = dest as *const keystone_sbi_create as usize;
+    let region_overlap: i32 = copy_to_sm(dst, src, mem::size_of::<keystone_sbi_create>()); // mprv.rs
 
-  if region_overlap != 0 {
-    return ERROR::SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS; // error_code.rs
+    if region_overlap != 0 {
+      return ERROR::SBI_ERR_SM_ENCLAVE_REGION_OVERLAPS; // error_code.rs
+    }
+    else {
+      return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
+    }
   }
-  else {
-    return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
-  }
-
 }
 
 pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> usize {
@@ -170,9 +173,9 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
   let pa_params: runtime_pa_params;
   pa_params.dram_base = base;
   pa_params.dram_size = size;
-  pa_params.runtime_base = create_args.runtime_paddr;
-  pa_params.user_base = create_args.user_paddr;
-  pa_params.free_base = create_args.free_paddr;
+  pa_params.runtime_base = create_args.runtime_paddr as usize;
+  pa_params.user_base = create_args.user_paddr as usize;
+  pa_params.free_base = create_args.free_paddr as usize;
 
 
   // allocate eid
@@ -263,8 +266,8 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
 }
 
 fn is_create_args_valid(args: &mut keystone_sbi_create) -> i32 {
-  let epm_start: usize;
-  let epm_end: usize;
+  let epm_start: u32;
+  let epm_end: u32;
 
   /* printm("[create args info]: \r\n\tepm_addr: %llx\r\n\tepmsize: %llx\r\n\tutm_addr: %llx\r\n\tutmsize: %llx\r\n\truntime_addr: %llx\r\n\tuser_addr: %llx\r\n\tfree_addr: %llx\r\n", */
   /*        args.epm_region.paddr, */
@@ -316,7 +319,7 @@ fn is_create_args_valid(args: &mut keystone_sbi_create) -> i32 {
   return 1;
 }
 
-fn get_enclave_region_index(eid: enclave_id, entype: enclave_region_type) -> i32 {
+pub fn get_enclave_region_index(eid: enclave_id, entype: enclave_region_type) -> i32 {
   let i: usize;
   for i in 0..ENCLAVE_REGIONS_MAX {
     if enclaves[eid].regions[i].region_type == entype {
@@ -503,15 +506,21 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
     return ret;
   }
 
-  /* copy data to be signed */
-  ret = copy_enclave_data(&mut enclaves[eid], report.enclave.data, data, size);
-  report.enclave.data_len = size as u64;
-
-  if ret != 0 {
-    ret = ERROR::SBI_ERR_SM_ENCLAVE_NOT_ACCESSIBLE;
-    spin_unlock(&encl_lock);
-    return ret;
+  unsafe {
+    let enclave_data: usize = (&report.enclave.data as *const u8) as usize;
+    
+    /* copy data to be signed */
+    ret = copy_enclave_data(enclave_data, data, size);
+    
+    if ret != 0 {
+      ret = ERROR::SBI_ERR_SM_ENCLAVE_NOT_ACCESSIBLE;
+      spin_unlock(&encl_lock);
+      return ret;
+    }
   }
+  
+
+  report.enclave.data_len = size as u64;
 
   spin_unlock(&encl_lock); // Don't need to wait while signing, which might take some time
 
@@ -521,7 +530,7 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
   sbi_memcpy(report.sm.public_key, sm_public_key, crypto::PUBLIC_KEY_SIZE);
   sbi_memcpy(report.sm.signature, sm_signature, crypto::SIGNATURE_SIZE);
   sbi_memcpy(report.enclave.hash, enclaves[eid].hash, crypto::MDSIZE);
-  sm_sign(report.enclave.signature, &report.enclave, mem::size_of::<enclave_report>() - crypto::SIGNATURE_SIZE - ATTEST_DATA_MAXLEN + size);
+  sm::sm_sign(&report.enclave.signature, &report.enclave, mem::size_of::<enclave_report>() - crypto::SIGNATURE_SIZE - ATTEST_DATA_MAXLEN + size);
 
   spin_lock(&encl_lock);
 
@@ -535,10 +544,13 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
   }
 
   ret = ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
+
+  spin_unlock(&encl_lock);
+  return ret;
 }
 
 /* copies data from enclave, source must be inside EPM */
-fn copy_enclave_data(enclave: &mut enclave, dest: &mut usize, source: usize, size: usize) -> usize {
+fn copy_enclave_data(dest: usize, source: usize, size: usize) -> usize {
 
   let illegal: i32 = mprv::copy_to_sm(dest, source, size);
 
@@ -553,7 +565,7 @@ fn copy_enclave_data(enclave: &mut enclave, dest: &mut usize, source: usize, siz
 /* copies data into enclave, destination must be inside EPM */
 fn copy_enclave_report(enclave: &mut enclave, dest: usize, source: &mut report) -> usize {
 
-  let illegal: i32 = mprv::copy_from_sm(dest, source, mem::size_of::<report>());
+  let illegal: i32 = mprv::copy_from_sm(dest, source as *const report as usize, mem::size_of::<report>());
 
   if illegal != 0 {
     return ERROR::SBI_ERR_SM_ENCLAVE_ILLEGAL_ARGUMENT;
@@ -561,20 +573,21 @@ fn copy_enclave_report(enclave: &mut enclave, dest: usize, source: &mut report) 
   else {
     return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
   }
+
 }
 
-pub fn get_sealing_key(seal_key: usize, key_ident: usize, key_ident_size: usize, eid: enclave_id) -> usize {
+pub fn get_sealing_key(seal_key: &mut sealing_key, key_ident: &[u8], key_ident_size: usize, eid: enclave_id) -> usize {
   let key_struct: *mut sealing_key = seal_key as *mut sealing_key;
   let ret: i32;
 
   /* derive key */
-  ret = sm::sm_derive_sealing_key((*key_struct).key, key_ident, key_ident_size, enclaves[eid].hash);
+  ret = sm::sm_derive_sealing_key(&mut seal_key.key, key_ident, key_ident_size, &enclaves[eid].hash);
   if ret != 0 {
     return ERROR::SBI_ERR_SM_ENCLAVE_UNKNOWN_ERROR;
   }
 
   /* sign derived key */
-  sm::sm_sign((*key_struct).signature, (*key_struct).key,
+  sm::sm_sign(&(*key_struct).signature, (*key_struct).key,
   SEALING_KEY_SIZE);
 
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
@@ -625,7 +638,7 @@ fn clean_enclave_memory(utbase: usize, utsize: usize) -> usize {
   // Zero out the untrusted memory region, since it may be in
   // indeterminate state.
   // opensbi
-  sbi_memset(utbase as *mut usize, 0, utsize);
+  sbi_memset(utbase as *mut usize, 0, utsize); // opensbi
 
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
 }
@@ -634,7 +647,7 @@ fn context_switch_to_enclave(regs: &mut sbi_trap_regs, eid: enclave_id, load_par
   /* save host context */
   thread::swap_prev_state(&mut enclaves[eid].threads[0], regs, 1);
   thread::swap_prev_mepc(&mut enclaves[eid].threads[0], regs, regs.mepc);
-  thread::swap_prev_mstatus(&enclaves[eid].threads[0], regs, regs.mstatus);
+  thread::swap_prev_mstatus(&mut enclaves[eid].threads[0], regs, regs.mstatus);
 
   let interrupts: usize = 0;
   // opensbi
@@ -645,7 +658,7 @@ fn context_switch_to_enclave(regs: &mut sbi_trap_regs, eid: enclave_id, load_par
     csr_write(sepc, enclaves[eid].params.user_entry as usize);
     regs.mepc = (enclaves[eid].params.runtime_entry - 4) as usize; // regs->mepc will be +4 before sbi_ecall_handler return
     // opensbi
-    regs.mstatus = (1 << MSTATUS_MPP_SHIFT);
+    regs.mstatus = (1 << MSTATUS_MPP_SHIFT); // opensbi
     // $a1: (PA) DRAM base,
     regs.a1 = enclaves[eid].pa_params.dram_base as usize;
     // $a2: (PA) DRAM size,
@@ -668,17 +681,17 @@ fn context_switch_to_enclave(regs: &mut sbi_trap_regs, eid: enclave_id, load_par
   thread::switch_vector_enclave();
 
   // set PMP
-  sm::osm_pmp_set(PMP_NO_PERM);
+  sm::osm_pmp_set(pmp::PMP_NO_PERM as u8);
   let memid: i32;
   for memid in 0..ENCLAVE_REGIONS_MAX {
     if enclaves[eid].regions[memid].region_type != enclave_region_type::REGION_INVALID {
-      pmp_set_keystone(enclaves[eid].regions[memid].pmp_rid, PMP_ALL_PERM);
+      pmp::pmp_set_keystone(enclaves[eid].regions[memid].pmp_rid, pmp::PMP_ALL_PERM as u8);
     }
   }
 
   // Setup any platform specific defenses
   platform_switch_to_enclave(&(enclaves[eid]));
-  cpu_enter_enclave_context(eid);
+  cpu::cpu_enter_enclave_context(eid);
 }
 
 fn context_switch_to_host(regs: &mut sbi_trap_regs, eid: enclave_id, return_on_resume: bool) {
@@ -687,32 +700,32 @@ fn context_switch_to_host(regs: &mut sbi_trap_regs, eid: enclave_id, return_on_r
   let memid: i32;
   for memid in 0..ENCLAVE_REGIONS_MAX {
     if enclaves[eid].regions[memid].region_type != enclave_region_type::REGION_INVALID {
-      pmp_set_keystone(enclaves[eid].regions[memid].pmp_rid, PMP_NO_PERM);
+      pmp::pmp_set_keystone(enclaves[eid].regions[memid].pmp_rid, pmp::PMP_NO_PERM as u8);
     }
   }
-  osm_pmp_set(PMP_ALL_PERM);
+  sm::osm_pmp_set(pmp::PMP_ALL_PERM as u8);
 
-  let interrupts: usize = MIP_SSIP | MIP_STIP | MIP_SEIP;
+  let interrupts: usize = MIP_SSIP | MIP_STIP | MIP_SEIP; // opensbi
   csr_write(mideleg, interrupts);
 
   /* restore host context */
-  swap_prev_state(&enclaves[eid].threads[0], regs, return_on_resume);
-  swap_prev_mepc(&enclaves[eid].threads[0], regs, regs.mepc);
-  swap_prev_mstatus(&enclaves[eid].threads[0], regs, regs.mstatus);
+  thread::swap_prev_state(&mut enclaves[eid].threads[0], regs, return_on_resume as usize);
+  thread::swap_prev_mepc(&mut enclaves[eid].threads[0], regs, regs.mepc);
+  thread::swap_prev_mstatus(&mut enclaves[eid].threads[0], regs, regs.mstatus);
 
-  switch_vector_host();
+  thread::switch_vector_host();
 
   let pending: usize = csr_read(mip);
 
-  if (pending & MIP_MTIP) {
+  if pending & MIP_MTIP != 0 {
     csr_clear(mip, MIP_MTIP);
     csr_set(mip, MIP_STIP);
   }
-  if (pending & MIP_MSIP) {
+  if pending & MIP_MSIP != 0 {
     csr_clear(mip, MIP_MSIP);
     csr_set(mip, MIP_SSIP);
   }
-  if (pending & MIP_MEIP) {
+  if pending & MIP_MEIP != 0 {
     csr_clear(mip, MIP_MEIP);
     csr_set(mip, MIP_SEIP);
   }
@@ -720,7 +733,7 @@ fn context_switch_to_host(regs: &mut sbi_trap_regs, eid: enclave_id, return_on_r
   // Reconfigure platform specific defenses
   platform_switch_from_enclave(&(enclaves[eid]));
 
-  cpu_exit_enclave_context();
+  cpu::cpu_exit_enclave_context();
 
   return;
 }

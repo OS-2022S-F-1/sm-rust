@@ -131,6 +131,11 @@ impl csrs {
   }
 }
 
+pub fn switch_vector_host() { // ?
+  extern void _trap_handler();
+  csr_write(mtvec, &_trap_handler);
+}
+
 pub fn switch_vector_enclave() {
   // opensbi
   extern void trap_vector_enclave();
@@ -163,11 +168,6 @@ pub fn swap_prev_state(thread: &mut thread_state, regs: &mut sbi_trap_regs, retu
   return;
 }
 
-fn local_swap_csr(thread: &mut thread_state, csrname) {
-  let tmp = thread.prev_csrs.csrname;
-  thread.prev_csrs.csrname = csr_read(csrname); 
-}
-
 /* Swaps all s-mode csrs defined in 1.10 standard */
 /* TODO: Right now we are only handling the ones that our test
 platforms support. Realistically we should have these behind
@@ -176,26 +176,60 @@ fn swap_prev_smode_csrs(thread: &mut thread_state) {
 
   let tmp: usize;
 
-#define LOCAL_SWAP_CSR(csrname) \
-  tmp = thread->prev_csrs.csrname;                 \
-  thread->prev_csrs.csrname = csr_read(csrname);   \
-  csr_write(csrname, tmp);
+  // sstatus
+  tmp: usize = thread.prev_csrs.sstatus;
+  thread.prev_csrs.sstatus = csr_read(sstatus);
+  csr_write(sstatus, tmp);
 
-  LOCAL_SWAP_CSR(sstatus);
   // These only exist with N extension.
   //LOCAL_SWAP_CSR(sedeleg);
   //LOCAL_SWAP_CSR(sideleg);
-  LOCAL_SWAP_CSR(sie);
-  LOCAL_SWAP_CSR(stvec);
-  LOCAL_SWAP_CSR(scounteren);
-  LOCAL_SWAP_CSR(sscratch);
-  LOCAL_SWAP_CSR(sepc);
-  LOCAL_SWAP_CSR(scause);
-  LOCAL_SWAP_CSR(sbadaddr);
-  LOCAL_SWAP_CSR(sip);
-  LOCAL_SWAP_CSR(satp);
 
-#undef LOCAL_SWAP_CSR
+  // sie
+  tmp: usize = thread.prev_csrs.sie;
+  thread.prev_csrs.sie = csr_read(sie);
+  csr_write(sie, tmp);
+
+  // stvec
+  tmp: usize = thread.prev_csrs.stvec;
+  thread.prev_csrs.stvec = csr_read(stvec);
+  csr_write(stvec, tmp);
+
+  // scounteren
+  tmp: usize = thread.prev_csrs.scounteren;
+  thread.prev_csrs.scounteren = csr_read(scounteren);
+  csr_write(scounteren, tmp);
+
+  // sscratch
+  tmp: usize = thread.prev_csrs.sscratch;
+  thread.prev_csrs.sscratch = csr_read(sscratch);
+  csr_write(sscratch, tmp);
+
+  // sepc
+  tmp: usize = thread.prev_csrs.sepc;
+  thread.prev_csrs.sepc = csr_read(sepc);
+  csr_write(sepc, tmp);
+
+  // scause
+  tmp: usize = thread.prev_csrs.scause;
+  thread.prev_csrs.scause = csr_read(scause);
+  csr_write(scause, tmp);
+
+  // sbadaddr
+  tmp: usize = thread.prev_csrs.sbadaddr;
+  thread.prev_csrs.sbadaddr = csr_read(sbadaddr);
+  csr_write(sbadaddr, tmp);
+
+  // sip
+  tmp: usize = thread.prev_csrs.sip;
+  thread.prev_csrs.sip = csr_read(sip);
+  csr_write(sip, tmp);
+
+  // satp
+  tmp: usize = thread.prev_csrs.satp;
+  thread.prev_csrs.satp = csr_read(satp);
+  csr_write(satp, tmp);
+
 }
 
 unsafe fn any_as_usize_slice<T: Sized>(p: &T) -> &[usize] {
@@ -239,3 +273,15 @@ fn clean_smode_csrs(state: &mut thread_state){
   state.prev_csrs.satp = 0;
 
 }
+
+pub fn swap_prev_mstatus(thread: &mut thread_state, regs: &mut sbi_trap_regs, current_mstatus: usize) {
+  //Time interrupts can occur in either user mode or supervisor mode
+  let mstatus_mask: usize = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP |
+                            MSTATUS_MPP | MSTATUS_FS | MSTATUS_SUM |
+                            MSTATUS_MXR; // opensbi
+
+  let tmp: usize = thread.prev_mstatus;
+  thread.prev_mstatus = (current_mstatus & !mstatus_mask) | (current_mstatus & mstatus_mask);
+  regs.mstatus = (current_mstatus & !mstatus_mask) | tmp;
+}
+

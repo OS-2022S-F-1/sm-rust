@@ -65,11 +65,11 @@ struct keystone_sbi_pregion { // physical memory
 }
 
 pub struct runtime_pa_params {
-  pub dram_base: uintptr_t,
-  pub dram_size: uintptr_t, 
-  pub runtime_base: uintptr_t,
-  pub user_base: uintptr_t,
-  pub free_base: uintptr_t 
+  pub dram_base: usize,
+  pub dram_size: usize, 
+  pub runtime_base: usize,
+  pub user_base: usize,
+  pub free_base: usize 
 }
 
 impl runtime_pa_params {
@@ -121,7 +121,7 @@ pub fn osm_pmp_set(perm: u8) -> i32{
 
 pub fn smm_init() -> i32 {
   let region: i32 = -1;
-  let ret: i32 = pmp::pmp_region_init_atomic(SMM_BASE, SMM_SIZE, pmp::pmp_priority::PMP_PRI_TOP, &region, 0);
+  let ret: i32 = pmp::pmp_region_init_atomic(SMM_BASE, SMM_SIZE, pmp::pmp_priority::PMP_PRI_TOP, &mut region, 0);
   if ret != 0 {
     return -1;
   }
@@ -131,20 +131,20 @@ pub fn smm_init() -> i32 {
 
 pub fn osm_init() -> i32 {
   let region: i32 = -1;
-  let ret: i32 = pmp::pmp_region_init_atomic(0, -1UL, pmp::pmp_priority::PMP_PRI_BOTTOM, &region, 1);
-  if ret {
+  let ret: i32 = pmp::pmp_region_init_atomic(0, usize::MAX, pmp::pmp_priority::PMP_PRI_BOTTOM, &mut region, 1);
+  if ret != 0 {
     return -1;
   }
   return region;
 }
 
-pub fn sm_derive_sealing_key(key: &mut u8, key_ident: &mut u8, key_ident_size: size_t, enclave_hash: &mut u8) -> i32 {
+pub fn sm_derive_sealing_key(key: &mut [u8], key_ident: &[u8], key_ident_size: usize, enclave_hash: &[u8]) -> i32 {
 
-  let info: [u8;crypto::MDSIZE + key_ident_size];
+  let info: [u8] = key_ident + enclave_hash;
 
   // opensbi 函数
-  sbi_memcpy(info, enclave_hash, crypto::MDSIZE);
-  sbi_memcpy(info + crypto::MDSIZE, key_ident, key_ident_size);
+  // sbi_memcpy(info, enclave_hash, crypto::MDSIZE);
+  // sbi_memcpy(info + crypto::MDSIZE, key_ident, key_ident_size);
 
   /*
   * The key is derived without a salt because we have no entropy source
@@ -153,7 +153,7 @@ pub fn sm_derive_sealing_key(key: &mut u8, key_ident: &mut u8, key_ident_size: s
   return crypto::kdf(0, sm_private_key, info, key);
 }
 
-pub fn sm_sign(void* signature, const void* data, size_t len) {
+pub fn sm_sign(signature: &[u8], const void* data, len: usize) {
   crypt::sign(, data, len, sm_public_key, sm_private_key);
 }
 

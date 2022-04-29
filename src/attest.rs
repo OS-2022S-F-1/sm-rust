@@ -1,60 +1,80 @@
-use crate::enclave::enclave;
+use crate::enclave;
 use crate::page;
 use std::mem;
 use crate::error_code::ERROR;
 use crate::crypto;
 use crate::sm;
+use crate::pmp;
 
-pub fn validate_and_hash_enclave(enclave: &mut enclave) -> usize {
+type pte_t = usize;
+
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+  ::std::slice::from_raw_parts(
+      (p as *const T) as *const u8,
+      ::std::mem::size_of::<T>(),
+  )
+}
+
+pub fn validate_and_hash_enclave(enclave: &mut enclave::enclave) -> usize {
 
     let hash_ctx: crypto::hash_ctx;
     let ptlevel: i32 = page::RISCV_PGLEVEL_TOP as i32;
   
     crypto::hash_init(&mut hash_ctx); // crypto.rs
-  
-    // hash the runtime parameters
-    crypto::hash_extend(&mut hash_ctx, enclave.params as &[u8], mem::size_of::<sm::runtime_va_params_t>());
-    // crypto.rs
-  
+
+    unsafe {
+      let params: &[u8] = any_as_u8_slice(&enclave.params);
+      // hash the runtime parameters
+      crypto::hash_extend(&mut hash_ctx, params, mem::size_of::<sm::runtime_va_params_t>());
+      // crypto.rs
+    }
+    
     let runtime_max_seen: usize = 0;
     let user_max_seen: usize = 0;
   
     // hash the epm contents including the virtual addresses
-    let valid: i32 = validate_and_hash_epm(&hash_ctx,
-                                      ptlevel,
-                                      (pte_t*) (enclave.encl_satp << RISCV_PGSHIFT),
-                                      0, 0, enclave, &runtime_max_seen, &user_max_seen);
+    let valid: i32 = validate_and_hash_epm(hash_ctx, ptlevel, (enclave.encl_satp << RISCV_PGSHIFT), 0, 0, enclave, runtime_max_seen, user_max_seen);
   
     if valid == -1 {
       return ERROR::SBI_ERR_SM_ENCLAVE_ILLEGAL_PTE;
     }
   
-    hash_finalize(enclave.hash, &hash_ctx); // crypto.rs
+    crypto::hash_finalize(&mut enclave.hash, &mut hash_ctx); // crypto.rs
   
     return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
   }
 
-fn validate_and_hash_epm(hash_ctx* hash_ctx, int level,
-    pte_t* tb, usize vaddr, int contiguous,
-    struct enclave* encl,
-    usize* runtime_max_seen,
-    usize* user_max_seen) {
-  pte_t* walk;
-  int i;
+fn validate_and_hash_epm(hash_ctx: &mut crypto::hash_ctx, level: i32, tb: pte_t, vaddr: usize, contiguous: i32, encl: &mut enclave::enclave, runtime_max_seen: &mut usize, user_max_seen: &mut usize) {
+      
+  let walk: pte_t;
+  let i: i32;
 
   //TODO check for failures
-  usize epm_start, epm_size;
-  usize utm_start, utm_size;
-  int idx = get_enclave_region_index(encl->eid, REGION_EPM);
-  epm_start = pmp_region_get_addr(encl->regions[idx].pmp_rid);
-  epm_size = pmp_region_get_size(encl->regions[idx].pmp_rid);
-  idx = get_enclave_region_index(encl->eid, REGION_UTM);
-  utm_start = pmp_region_get_addr(encl->regions[idx].pmp_rid);
-  utm_size = pmp_region_get_size(encl->regions[idx].pmp_rid);
-
-
+  let epm_start: usize;
+  let epm_size: usize;
+  let utm_start: usize;
+  let utm_size: usize;
+  let idx: i32 = enclave::get_enclave_region_index(encl.eid, enclave::enclave_region_type::REGION_EPM);
+  epm_start = pmp::pmp_region_get_addr(encl.regions[idx as usize].pmp_rid);
+  epm_size = pmp::pmp_region_get_size(encl.regions[idx as usize].pmp_rid);
+  idx = enclave::get_enclave_region_index(encl.eid, enclave::enclave_region_type::REGION_UTM);
+  utm_start = pmp::pmp_region_get_addr(encl.regions[idx as usize].pmp_rid);
+  utm_size = pmp::pmp_region_get_size(encl.regions[idx as usize].pmp_rid);
 
   /* iterate over PTEs */
+  walk = tb;
+  loop {
+    if walk >= tb + (RISCV_PGSIZE/sizeof(pte_t)) {
+      break;
+    }
+    if walk == 0 {
+      contiguous = 0;
+      continue;
+    }
+  }
+  for walk in 0...(RISCV_PGSIZE / mem::size_of<pte_t>()) {
+    
+  }
   for (walk=tb, i=0; walk < tb + (RISCV_PGSIZE/sizeof(pte_t)); walk += 1,i++)
   {
   if (*walk == 0) {
@@ -189,4 +209,4 @@ fn validate_and_hash_epm(hash_ctx* hash_ctx, int level,
 
   fatal_bail:
   return -1;
-  }
+}
