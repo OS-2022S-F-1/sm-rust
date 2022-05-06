@@ -1,6 +1,7 @@
 use crate::crypt::hkdf_sha3;
 use crate::crypt::ed25519;
 use crate::crypt::sha3;
+use crate::page;
 
 pub const MDSIZE: usize = 64;
 pub const PUBLIC_KEY_SIZE: usize = 32;
@@ -18,7 +19,7 @@ pub fn hash_extend(hash_ctx: &mut hash_ctx, data: &[u8], len: usize) {
 }
 
 pub fn hash_extend_page(hash_ctx: &mut hash_ctx, data: &[u8]) {
-  hash_ctx.update(&data[0..RISCV_PGSIZE]);
+  hash_ctx.update(&data[0..page::RISCV_PGSIZE]);
 }
 
 pub fn hash_finalize(md: &mut [u8], hash_ctx: &mut hash_ctx) {

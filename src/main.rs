@@ -14,6 +14,8 @@ mod crypt;
 mod page;
 mod ipi;
 mod assert;
+mod opensbi;
+mod sbi_trap;
 
 fn main() {
     println!("hello world");

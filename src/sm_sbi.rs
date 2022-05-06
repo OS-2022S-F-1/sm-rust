@@ -1,6 +1,8 @@
 use crate::enclave;
 use crate::sm;
 use crate::cpu;
+use crate::opensbi;
+use crate::trap_sbi;
 
 fn sbi_sm_create_enclave(eid: *mut usize, create_args: usize) -> usize {
     let create_args_local: sm::keystone_sbi_create; // sm.rs encalve argument
@@ -19,36 +21,36 @@ fn sbi_sm_destroy_enclave(eid: usize) -> usize {
     return ret;
 }
 
-fn sbi_sm_run_enclave(regs: &mut sbi_trap_regs /*opensbi*/, eid: usize) -> usize {
+fn sbi_sm_run_enclave(regs: &mut trap_sbi::sbi_trap_regs /*opensbi*/, eid: usize) -> usize {
     regs.a0 = enclave::run_enclave(regs, eid); // enclave.rs
     regs.mepc += 4;
-    sbi_trap_exit(regs); // opensbi 提供函数
+    opensbi::sbi_trap_exit(regs); // opensbi 提供函数
     0
 }
 
-fn sbi_sm_exit_enclave(regs: &mut sbi_trap_regs, retval: usize) -> usize {
+fn sbi_sm_exit_enclave(regs: &mut trap_sbi::sbi_trap_regs, retval: usize) -> usize {
     regs.a0 = enclave::exit_enclave(regs, cpu::cpu_get_enclave_id()); // enclave.rs
     regs.a1 = retval;
     regs.mepc += 4;
-    sbi_trap_exit(regs); // opensbi 提供函数
+    opensbi::sbi_trap_exit(regs); // opensbi 提供函数
     0
 }
 
-fn sbi_sm_stop_enclave(regs: &mut sbi_trap_regs, request: usize) -> usize {
+fn sbi_sm_stop_enclave(regs: &mut trap_sbi::sbi_trap_regs, request: usize) -> usize {
     regs.a0 = enclave::stop_enclave(regs, request, cpu::cpu_get_enclave_id()); // enclave.rs
     regs.mepc += 4;
-    sbi_trap_exit(regs); // opensbi 提供函数
+    opensbi::sbi_trap_exit(regs); // opensbi 提供函数
     0
 }
 
-fn sbi_sm_resume_enclave(regs: &mut sbi_trap_regs, eid: usize) -> usize {
+fn sbi_sm_resume_enclave(regs: &mut trap_sbi::sbi_trap_regs, eid: usize) -> usize {
     let ret: usize = enclave::resume_enclave(regs, eid); // enclave.rs
     if !regs.zero {
         regs.a0 = ret;
     }
     regs.mepc += 4;
 
-    sbi_trap_exit(regs); // opensbi 提供函数
+    opensbi::sbi_trap_exit(regs); // opensbi 提供函数
     return 0;
 }
 

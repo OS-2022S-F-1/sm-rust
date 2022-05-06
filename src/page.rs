@@ -1,18 +1,20 @@
-pub const RISCV_PGSIZE: usize =  PAGE_SIZE; //opensbi
-pub const RISCV_PGSHIFT: usize =  PAGE_SHIFT;
+use crate::opensbi;
 
-/*
+pub const RISCV_PGSIZE: usize =  opensbi::PAGE_SIZE; //opensbi
+pub const RISCV_PGSHIFT: usize =  opensbi::PAGE_SHIFT;
+
+
 /* page table entry (PTE) fields */
-#define PTE_V                _UL(0x001) /* Valid */
-#define PTE_R                _UL(0x002) /* Read */
-#define PTE_W                _UL(0x004) /* Write */
-#define PTE_X                _UL(0x008) /* Execute */
-#define PTE_U                _UL(0x010) /* User */
-#define PTE_G                _UL(0x020) /* Global */
-#define PTE_A                _UL(0x040) /* Accessed */
-#define PTE_D                _UL(0x080) /* Dirty */
-#define PTE_SOFT            _UL(0x300) /* Reserved for Software */
-*/
+pub const PTE_V: usize = 0x001; /* Valid */
+pub const PTE_R: usize = 0x002; /* Read */
+pub const PTE_W: usize = 0x004; /* Write */
+pub const PTE_X: usize = 0x008; /* Execute */
+pub const PTE_U: usize = 0x010; /* User */
+pub const PTE_G: usize = 0x020; /* Global */
+pub const PTE_A: usize = 0x040; /* Accessed */
+pub const PTE_D: usize = 0x080; /* Dirty */
+pub const PTE_SOFT: usize = 0x300; /* Reserved for Software */
+
 
 #[cfg(target_pointer_width = "32")]
 pub mod page {

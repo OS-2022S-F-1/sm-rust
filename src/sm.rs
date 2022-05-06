@@ -1,6 +1,8 @@
 use crate::crypto;
 use crate::pmp;
 use crate::error_code::ERROR;
+use crate::enclave;
+use crate::opensbi;
 
 const SMM_BASE: usize = 0x80000000;
 const SMM_SIZE: usize = 0x200000;
@@ -58,6 +60,19 @@ const SBI_ERR_SM_PMP_REGION_IMPOSSIBLE_TOR: usize = 100026;
 static mut sm_init_done: i32 = 0;
 static mut sm_region_id: i32 = 0; 
 static mut os_region_id: i32 = 0;
+
+static mut sm_hash: [u8;crypto::MDSIZE] = [0;crypto::MDSIZE];
+static mut sm_signature: [u8;crypto::SIGNATURE_SIZE] = [0;crypto::SIGNATURE_SIZE];
+static mut sm_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
+static mut sm_private_key: [u8;crypto::PRIVATE_KEY_SIZE] = [0;crypto::PRIVATE_KEY_SIZE];
+static mut dev_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
+
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+  ::std::slice::from_raw_parts(
+      (p as *const T) as *const u8,
+      ::std::mem::size_of::<T>(),
+  )
+}
 
 struct keystone_sbi_pregion { // physical memory
   pub paddr: u32,
@@ -140,17 +155,20 @@ pub fn osm_init() -> i32 {
 
 pub fn sm_derive_sealing_key(key: &mut [u8], key_ident: &[u8], key_ident_size: usize, enclave_hash: &[u8]) -> i32 {
 
-  let info: [u8] = key_ident + enclave_hash;
+  let info: usize;
 
   // opensbi 函数
-  // sbi_memcpy(info, enclave_hash, crypto::MDSIZE);
-  // sbi_memcpy(info + crypto::MDSIZE, key_ident, key_ident_size);
+  opensbi::sbi_memcpy(info, enclave_hash, crypto::MDSIZE);
+  opensbi::sbi_memcpy(info + crypto::MDSIZE, key_ident, key_ident_size);
 
   /*
   * The key is derived without a salt because we have no entropy source
   * available to generate the salt.
   */
-  return crypto::kdf(0, sm_private_key, info, key);
+  unsafe {
+    let info_ptr: &[u8] = any_as_u8_slice(&info);
+    return crypto::kdf(0, &sm_private_key, info_ptr, key);
+  }
 }
 
 pub fn sm_sign(signature: &[u8], const void* data, len: usize) {
@@ -159,19 +177,19 @@ pub fn sm_sign(signature: &[u8], const void* data, len: usize) {
 
 fn sm_copy_key() {
   // opensbi
-  sbi_memcpy(sm_hash, sanctum_sm_hash, crypto::MDSIZE);
-  sbi_memcpy(sm_signature, sanctum_sm_signature, crypto::SIGNATURE_SIZE);
-  sbi_memcpy(sm_public_key, sanctum_sm_public_key, crypto::PUBLIC_KEY_SIZE);
-  sbi_memcpy(sm_private_key, sanctum_sm_secret_key, crypto::PRIVATE_KEY_SIZE);
-  sbi_memcpy(dev_public_key, sanctum_dev_public_key, crypto::PUBLIC_KEY_SIZE);
+  opensbi::sbi_memcpy(sm_hash, sanctum_sm_hash, crypto::MDSIZE);
+  opensbi::sbi_memcpy(sm_signature, sanctum_sm_signature, crypto::SIGNATURE_SIZE);
+  opensbi::sbi_memcpy(sm_public_key, sanctum_sm_public_key, crypto::PUBLIC_KEY_SIZE);
+  opensbi::sbi_memcpy(sm_private_key, sanctum_sm_secret_key, crypto::PRIVATE_KEY_SIZE);
+  opensbi::sbi_memcpy(dev_public_key, sanctum_dev_public_key, crypto::PUBLIC_KEY_SIZE);
 }
 
 fn sm_print_hash() {
   for i in 0..crypto::MDSIZE {
     // opensbi
-    sbi_printf("%02x", (char) sm_hash[i]);
+    println!("%{}", sm_hash[i]);
   }
-  sbi_printf("\n");
+  println!("\n");
 }
 
 fn sm_init(cold_boot: bool) {
@@ -179,7 +197,7 @@ fn sm_init(cold_boot: bool) {
   if cold_boot {
     /* only the cold-booting hart will execute these */
     // opensbi
-    sbi_printf("[SM] Initializing ... hart [%lx]\n", csr_read(mhartid));
+    println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
 
     // opensbi
     sbi_ecall_register_extension(&ecall_keystone_enclave);
@@ -187,34 +205,34 @@ fn sm_init(cold_boot: bool) {
     sm_region_id = smm_init();
     if sm_region_id < 0 {
       // opensbi
-      sbi_printf("[SM] intolerable error - failed to initialize SM memory");
-      sbi_hart_hang();
+      println!("[SM] intolerable error - failed to initialize SM memory");
+      opensbi::sbi_hart_hang();
     }
 
     os_region_id = osm_init();
     if os_region_id < 0 {
       // opensbi
-      sbi_printf("[SM] intolerable error - failed to initialize OS memory");
-      sbi_hart_hang();
+      println!("[SM] intolerable error - failed to initialize OS memory");
+      opensbi::sbi_hart_hang();
     }
 
     if (platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS) {
-      sbi_printf("[SM] platform global init fatal error");
-      sbi_hart_hang();
+      println!("[SM] platform global init fatal error");
+      opensbi::sbi_hart_hang();
     }
     // Copy the keypair from the root of trust
     sm_copy_key();
 
     // Init the enclave metadata
-    enclave_init_metadata(); // enclave.rs
+    enclave::enclave_init_metadata(); // enclave.rs
 
     sm_init_done = 1;
-    mb(); // opensbi
+    opensbi::mb(); // opensbi
   }
 
   /* wait until cold-boot hart finishes */
   while sm_init_done == 0 {
-    mb(); // opensbi
+    opensbi::mb(); // opensbi
   }
 
   /* below are executed by all harts */
@@ -225,12 +243,12 @@ fn sm_init(cold_boot: bool) {
   /* Fire platform specific global init */
   if platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
     // opensbi
-    sbi_printf("[SM] platform global init fatal error");
-    sbi_hart_hang();
+    println!("[SM] platform global init fatal error");
+    opensbi::sbi_hart_hang();
   }
 
   // opensbi
-  sbi_printf("[SM] Keystone security monitor has been initialized!\n");
+  println!("[SM] Keystone security monitor has been initialized!\n");
 
   sm_print_hash();
 

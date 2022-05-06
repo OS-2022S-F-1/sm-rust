@@ -15,6 +15,8 @@ use crate::mprv;
 use crate::sm;
 use crate::page;
 use crate::cpu;
+use crate::opensbi;
+use crate::sbi_trap;
 
 use std::mem;
 
@@ -30,6 +32,8 @@ const STOP_EXIT_ENCLAVE: usize = 2;
 
 const ATTEST_DATA_MAXLEN: usize = 1024;
 const SEALING_KEY_SIZE: usize = 128;
+
+static encl_lock: spinlock_t = SPIN_LOCK_INITIALIZER;
 
 static mut enclaves: [enclave;ENCL_MAX] = [enclave::new();ENCL_MAX];
 
@@ -209,7 +213,6 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
   // cleanup some memory regions for sanity See issue #38
   clean_enclave_memory(utbase, utsize); // enclave.rs
 
-
   // initialize enclave metadata
   enclaves[eid].eid = eid;
   enclaves[eid].regions[0].pmp_rid = region;
@@ -218,10 +221,10 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
   enclaves[eid].regions[1].region_type = enclave_region_type::REGION_UTM;
 
   if cfg!(target_pointer_width = "32") {
-    enclaves[eid].encl_satp = ((base >> page::RISCV_PGSHIFT) | (SATP_MODE_SV32 << HGATP_MODE_SHIFT)); // opensbi
+    enclaves[eid].encl_satp = (base >> page::RISCV_PGSHIFT) | (opensbi::SATP_MODE_SV32 << opensbi::Const::HGATP_MODE_SHIFT); // opensbi
   }
   else {
-    enclaves[eid].encl_satp = ((base >> page::RISCV_PGSHIFT) | (SATP_MODE_SV39 << HGATP_MODE_SHIFT)); // opensbi
+    enclaves[eid].encl_satp = (base >> page::RISCV_PGSHIFT) | (opensbi::SATP_MODE_SV39 << opensbi::Const::HGATP_MODE_SHIFT); // opensbi
   }
 
   enclaves[eid].n_thread = 0;
@@ -243,11 +246,11 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
   }
 
   /* Validate memory, prepare hash and signature for attestation */
-  spin_lock(&encl_lock); // FIXME This should error for second enter.
+  opensbi::spin_lock(&encl_lock); // FIXME This should error for second enter.
   ret = attest::validate_and_hash_enclave(&mut enclaves[eid]) as usize;
   /* The enclave is fresh if it has been validated and hashed but not run yet. */
   if ret != 0 {
-    spin_unlock(&encl_lock);
+    opensbi::spin_unlock(&encl_lock);
     platform_destroy_enclave(&enclaves[eid]);
     pmp::pmp_unset_global(region);
     pmp::pmp_region_free_atomic(shared_region);
@@ -260,7 +263,7 @@ pub fn create_enclave(eidptr: *mut usize, create_args: keystone_sbi_create) -> u
   /* EIDs are unsigned int in size, copy via simple copy */
   *eidptr = eid;
 
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
 
 }
@@ -306,7 +309,6 @@ fn is_create_args_valid(args: &mut keystone_sbi_create) -> i32 {
     return 0;
   }
   
-
   // check the order of physical addresses
   if args.runtime_paddr > args.user_paddr {
     return 0;
@@ -338,14 +340,14 @@ pub fn get_enclave_region_index(eid: enclave_id, entype: enclave_region_type) ->
 pub fn destroy_enclave(eid: enclave_id) -> usize {
   let destroyable: i32;
 
-  spin_lock(&encl_lock);
+  opensbi::spin_lock(&encl_lock);
   destroyable = (enclave_exists(eid as usize) && enclaves[eid as usize].state <= enclave_state::STOPPED) as i32;
   /* update the enclave state first so that
    * no SM can run the enclave any longer */
   if destroyable != 0 {
     enclaves[eid as usize].state = enclave_state::DESTROYING;
   }
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
 
   if destroyable == 0 {
     return ERROR::SBI_ERR_SM_ENCLAVE_NOT_DESTROYABLE;
@@ -371,7 +373,7 @@ pub fn destroy_enclave(eid: enclave_id) -> usize {
     rid = enclaves[eid].regions[i].pmp_rid;
     base = pmp::pmp_region_get_addr(rid) as *mut usize;
     size = pmp::pmp_region_get_size(rid) as usize;
-    sbi_memset(base as *mut usize, 0, size); // opensbi 函数
+    opensbi::sbi_memset(base as *mut usize, 0, size); // opensbi 函数
 
     //1.b free pmp region
     pmp::pmp_unset_global(rid);
@@ -399,16 +401,16 @@ pub fn destroy_enclave(eid: enclave_id) -> usize {
 }
 
 // opensbi
-pub fn run_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
+pub fn run_enclave(regs: &mut sbi_trap::sbi_trap_regs, eid: enclave_id) -> usize {
   let runable: bool;
 
-  spin_lock(&encl_lock);
-  runable = (enclave_exists(eid) && enclaves[eid].state == enclave_state::FRESH);
+  opensbi::spin_lock(&encl_lock);
+  runable = enclave_exists(eid) && enclaves[eid].state == enclave_state::FRESH;
   if runable {
     enclaves[eid].state = enclave_state::RUNNING;
     enclaves[eid].n_thread += 1;
   }
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
 
   if !runable {
     return ERROR::SBI_ERR_SM_ENCLAVE_NOT_FRESH;
@@ -420,9 +422,9 @@ pub fn run_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
 }
 
-pub fn exit_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
+pub fn exit_enclave(regs: &mut sbi_trap::sbi_trap_regs, eid: enclave_id) -> usize {
 
-  spin_lock(&encl_lock);
+  opensbi::spin_lock(&encl_lock);
   let exitable = enclaves[eid].state == enclave_state::RUNNING;
   if exitable {
     enclaves[eid].n_thread -= 1;
@@ -430,7 +432,7 @@ pub fn exit_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
       enclaves[eid].state = enclave_state::STOPPED;
     }
   }
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
 
   if !exitable {
     return ERROR::SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
@@ -438,12 +440,13 @@ pub fn exit_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
   context_switch_to_host(regs, eid, false);
 
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
+
 }
 // opensbi函数
-pub fn stop_enclave(regs: &mut sbi_trap_regs, request: usize, eid: enclave_id) -> usize {
+pub fn stop_enclave(regs: &mut sbi_trap::sbi_trap_regs, request: usize, eid: enclave_id) -> usize {
   let stoppable: bool;
 
-  spin_lock(&encl_lock);
+  opensbi::spin_lock(&encl_lock);
   stoppable = enclaves[eid].state == enclave_state::RUNNING;
   if stoppable {
     enclaves[eid].n_thread -= 1;
@@ -451,7 +454,7 @@ pub fn stop_enclave(regs: &mut sbi_trap_regs, request: usize, eid: enclave_id) -
       enclaves[eid].state = enclave_state::STOPPED;
     }
   }
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
 
   if !stoppable {
     return ERROR::SBI_ERR_SM_ENCLAVE_NOT_RUNNING;
@@ -466,21 +469,21 @@ pub fn stop_enclave(regs: &mut sbi_trap_regs, request: usize, eid: enclave_id) -
   }
 }
 
-pub fn resume_enclave(regs: &mut sbi_trap_regs, eid: enclave_id) -> usize {
+pub fn resume_enclave(regs: &mut sbi_trap::sbi_trap_regs, eid: enclave_id) -> usize {
   let resumable: bool;
 
-  spin_lock(&encl_lock);
-  resumable = (enclave_exists(eid) && (enclaves[eid].state == enclave_state::RUNNING || enclaves[eid].state == enclave_state::STOPPED) && enclaves[eid].n_thread < MAX_ENCL_THREADS);
+  opensbi::spin_lock(&encl_lock);
+  resumable = enclave_exists(eid) && (enclaves[eid].state == enclave_state::RUNNING || enclaves[eid].state == enclave_state::STOPPED) && enclaves[eid].n_thread < MAX_ENCL_THREADS;
 
   if !resumable {
-    spin_unlock(&encl_lock);
+    opensbi::spin_unlock(&encl_lock);
     return ERROR::SBI_ERR_SM_ENCLAVE_NOT_RESUMABLE;
-  } 
+  }
   else {
     enclaves[eid].n_thread += 1;
     enclaves[eid].state = enclave_state::RUNNING;
   }
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
 
   // Enclave is OK to resume, context switch to it
   context_switch_to_enclave(regs, eid, 0);
@@ -497,12 +500,12 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
     return ERROR::SBI_ERR_SM_ENCLAVE_ILLEGAL_ARGUMENT;
   }
 
-  spin_lock(&encl_lock);
+  opensbi::spin_lock(&encl_lock);
   attestable = enclave_exists(eid) && (enclaves[eid].state >= enclave_state::FRESH);
 
   if !attestable {
     ret = ERROR::SBI_ERR_SM_ENCLAVE_NOT_INITIALIZED;
-    spin_unlock(&encl_lock);
+    opensbi::spin_unlock(&encl_lock);
     return ret;
   }
 
@@ -514,7 +517,7 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
     
     if ret != 0 {
       ret = ERROR::SBI_ERR_SM_ENCLAVE_NOT_ACCESSIBLE;
-      spin_unlock(&encl_lock);
+      opensbi::spin_unlock(&encl_lock);
       return ret;
     }
   }
@@ -522,30 +525,30 @@ pub fn attest_enclave(report_ptr: usize, data: usize, size: usize, eid: enclave_
 
   report.enclave.data_len = size as u64;
 
-  spin_unlock(&encl_lock); // Don't need to wait while signing, which might take some time
+  opensbi::spin_unlock(&encl_lock); // Don't need to wait while signing, which might take some time
 
   // opensbi 函数，复制 src 到 dst
-  sbi_memcpy(report.dev_public_key, dev_public_key, crypto::PUBLIC_KEY_SIZE);
-  sbi_memcpy(report.sm.hash, sm_hash, crypto::MDSIZE);
-  sbi_memcpy(report.sm.public_key, sm_public_key, crypto::PUBLIC_KEY_SIZE);
-  sbi_memcpy(report.sm.signature, sm_signature, crypto::SIGNATURE_SIZE);
-  sbi_memcpy(report.enclave.hash, enclaves[eid].hash, crypto::MDSIZE);
+  opensbi::sbi_memcpy(report.dev_public_key, dev_public_key, crypto::PUBLIC_KEY_SIZE);
+  opensbi::sbi_memcpy(report.sm.hash, sm_hash, crypto::MDSIZE);
+  opensbi::sbi_memcpy(report.sm.public_key, sm_public_key, crypto::PUBLIC_KEY_SIZE);
+  opensbi::sbi_memcpy(report.sm.signature, sm_signature, crypto::SIGNATURE_SIZE);
+  opensbi::sbi_memcpy(report.enclave.hash, enclaves[eid].hash, crypto::MDSIZE);
   sm::sm_sign(&report.enclave.signature, &report.enclave, mem::size_of::<enclave_report>() - crypto::SIGNATURE_SIZE - ATTEST_DATA_MAXLEN + size);
 
-  spin_lock(&encl_lock);
+  opensbi::spin_lock(&encl_lock);
 
   /* copy report to the enclave */
   ret = copy_enclave_report(&mut enclaves[eid], report_ptr, &mut report);
 
   if ret != 0 {
     ret = ERROR::SBI_ERR_SM_ENCLAVE_ILLEGAL_ARGUMENT;
-    spin_unlock(&encl_lock);
+    opensbi::spin_unlock(&encl_lock);
     return ret;
   }
 
   ret = ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
 
-  spin_unlock(&encl_lock);
+  opensbi::spin_unlock(&encl_lock);
   return ret;
 }
 
@@ -600,7 +603,7 @@ fn enclave_exists(eid: usize) -> bool {
 fn encl_alloc_eid(_eid: &mut enclave_id) -> usize {
   let eid: enclave_id;
 
-  spin_lock(&encl_lock); // opensbi
+  opensbi::spin_lock(&encl_lock); // opensbi
 
   for i in 0..ENCL_MAX {
     eid = i;
@@ -613,7 +616,7 @@ fn encl_alloc_eid(_eid: &mut enclave_id) -> usize {
     enclaves[eid].state = enclave_state::ALLOCATED;
   }
 
-  spin_unlock(&encl_lock); // opensbi 函数
+  opensbi::spin_unlock(&encl_lock); // opensbi 函数
 
   if eid != ENCL_MAX {
     *_eid = eid;
@@ -638,7 +641,7 @@ fn clean_enclave_memory(utbase: usize, utsize: usize) -> usize {
   // Zero out the untrusted memory region, since it may be in
   // indeterminate state.
   // opensbi
-  sbi_memset(utbase as *mut usize, 0, utsize); // opensbi
+  opensbi::sbi_memset(utbase as *mut usize, 0, utsize); // opensbi
 
   return ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS;
 }
@@ -651,14 +654,14 @@ fn context_switch_to_enclave(regs: &mut sbi_trap_regs, eid: enclave_id, load_par
 
   let interrupts: usize = 0;
   // opensbi
-  csr_write(mideleg, interrupts);
+  opensbi::csr_write("mideleg", interrupts);
 
   if load_parameters != 0 {
     // passing parameters for a first run
-    csr_write(sepc, enclaves[eid].params.user_entry as usize);
+    opensbi::csr_write("sepc", enclaves[eid].params.user_entry as usize);
     regs.mepc = (enclaves[eid].params.runtime_entry - 4) as usize; // regs->mepc will be +4 before sbi_ecall_handler return
     // opensbi
-    regs.mstatus = (1 << MSTATUS_MPP_SHIFT); // opensbi
+    regs.mstatus = 1 << opensbi::MSTATUS_MPP_SHIFT; // opensbi
     // $a1: (PA) DRAM base,
     regs.a1 = enclaves[eid].pa_params.dram_base as usize;
     // $a2: (PA) DRAM size,
@@ -675,7 +678,7 @@ fn context_switch_to_enclave(regs: &mut sbi_trap_regs, eid: enclave_id, load_par
     regs.a7 = enclaves[eid].params.untrusted_size as usize;
 
     // switch to the initial enclave page table
-    csr_write(satp, enclaves[eid].encl_satp);
+    opensbi::csr_write(satp, enclaves[eid].encl_satp);
   }
 
   thread::switch_vector_enclave();
@@ -706,7 +709,7 @@ fn context_switch_to_host(regs: &mut sbi_trap_regs, eid: enclave_id, return_on_r
   sm::osm_pmp_set(pmp::PMP_ALL_PERM as u8);
 
   let interrupts: usize = MIP_SSIP | MIP_STIP | MIP_SEIP; // opensbi
-  csr_write(mideleg, interrupts);
+  opensbi::csr_write("mideleg", interrupts);
 
   /* restore host context */
   thread::swap_prev_state(&mut enclaves[eid].threads[0], regs, return_on_resume as usize);
@@ -736,4 +739,29 @@ fn context_switch_to_host(regs: &mut sbi_trap_regs, eid: enclave_id, return_on_r
   cpu::cpu_exit_enclave_context();
 
   return;
+}
+
+
+// TODO: This function is externally used.
+// refactoring needed
+/*
+ * Init all metadata as needed for keeping track of enclaves
+ * Called once by the SM on startup
+ */
+pub fn enclave_init_metadata(){
+  let eid: enclave_id;
+  let i: i32 = 0;
+
+  /* Assumes eids are incrementing values, which they are for now */
+  for(eid=0; eid < ENCL_MAX; eid++){
+    enclaves[eid].state = INVALID;
+
+    // Clear out regions
+    for(i=0; i < ENCLAVE_REGIONS_MAX; i++){
+      enclaves[eid].regions[i].type = REGION_INVALID;
+    }
+    /* Fire all platform specific init for each enclave */
+    platform_init_enclave(&(enclaves[eid]));
+  }
+
 }

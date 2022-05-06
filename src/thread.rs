@@ -1,3 +1,6 @@
+use crate::opensbi;
+use crate::sbi_trap;
+
 pub struct thread_state {
   prev_mpp: i32,
   prev_mepc: usize,
@@ -142,14 +145,14 @@ pub fn switch_vector_enclave() {
   csr_write(mtvec, &trap_vector_enclave);
 }
 
-pub fn swap_prev_mepc(thread: &mut thread_state, regs: &mut sbi_trap_regs, current_mepc: usize) {
+pub fn swap_prev_mepc(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_regs, current_mepc: usize) {
   let tmp: usize = thread.prev_mepc;
   thread.prev_mepc = current_mepc;
   regs.mepc = tmp;
 }
 
 /* Swaps the entire s-mode visible state, general registers and then csrs */
-pub fn swap_prev_state(thread: &mut thread_state, regs: &mut sbi_trap_regs, return_on_resume: usize) {
+pub fn swap_prev_state(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_regs, return_on_resume: usize) {
   let i: i32;
 
   unsafe {
@@ -178,8 +181,8 @@ fn swap_prev_smode_csrs(thread: &mut thread_state) {
 
   // sstatus
   tmp: usize = thread.prev_csrs.sstatus;
-  thread.prev_csrs.sstatus = csr_read(sstatus);
-  csr_write(sstatus, tmp);
+  thread.prev_csrs.sstatus = opensbi::csr_read("sstatus");
+  opensbi::csr_write("sstatus", tmp);
 
   // These only exist with N extension.
   //LOCAL_SWAP_CSR(sedeleg);
@@ -187,48 +190,48 @@ fn swap_prev_smode_csrs(thread: &mut thread_state) {
 
   // sie
   tmp: usize = thread.prev_csrs.sie;
-  thread.prev_csrs.sie = csr_read(sie);
-  csr_write(sie, tmp);
+  thread.prev_csrs.sie = opensbi::csr_read("sie");
+  opensbi::csr_write("sie", tmp);
 
   // stvec
   tmp: usize = thread.prev_csrs.stvec;
-  thread.prev_csrs.stvec = csr_read(stvec);
-  csr_write(stvec, tmp);
+  thread.prev_csrs.stvec = opensbi::csr_read("stvec");
+  opensbi::csr_write("stvec", tmp);
 
   // scounteren
   tmp: usize = thread.prev_csrs.scounteren;
-  thread.prev_csrs.scounteren = csr_read(scounteren);
-  csr_write(scounteren, tmp);
+  thread.prev_csrs.scounteren = opensbi::csr_read("scounteren");
+  opensbi::csr_write("scounteren", tmp);
 
   // sscratch
   tmp: usize = thread.prev_csrs.sscratch;
-  thread.prev_csrs.sscratch = csr_read(sscratch);
-  csr_write(sscratch, tmp);
+  thread.prev_csrs.sscratch = opensbi::csr_read("sscratch");
+  opensbi::csr_write("sscratch", tmp);
 
   // sepc
   tmp: usize = thread.prev_csrs.sepc;
-  thread.prev_csrs.sepc = csr_read(sepc);
-  csr_write(sepc, tmp);
+  thread.prev_csrs.sepc = opensbi::csr_read("sepc");
+  opensbi::csr_write("sepc", tmp);
 
   // scause
   tmp: usize = thread.prev_csrs.scause;
-  thread.prev_csrs.scause = csr_read(scause);
-  csr_write(scause, tmp);
+  thread.prev_csrs.scause = opensbi::csr_read("scause");
+  opensbi::csr_write("scause", tmp);
 
   // sbadaddr
   tmp: usize = thread.prev_csrs.sbadaddr;
-  thread.prev_csrs.sbadaddr = csr_read(sbadaddr);
-  csr_write(sbadaddr, tmp);
+  thread.prev_csrs.sbadaddr = opensbi::csr_read("sbadaddr");
+  opensbi::csr_write("sbadaddr", tmp);
 
   // sip
   tmp: usize = thread.prev_csrs.sip;
-  thread.prev_csrs.sip = csr_read(sip);
-  csr_write(sip, tmp);
+  thread.prev_csrs.sip = opensbi::csr_read("sip");
+  opensbi::csr_write("sip", tmp);
 
   // satp
   tmp: usize = thread.prev_csrs.satp;
-  thread.prev_csrs.satp = csr_read(satp);
-  csr_write(satp, tmp);
+  thread.prev_csrs.satp = opensbi::csr_read("satp");
+  opensbi::csr_write("satp", tmp);
 
 }
 
@@ -264,7 +267,7 @@ fn clean_smode_csrs(state: &mut thread_state){
   state.prev_csrs.sie = 0;
   state.prev_csrs.stvec = 0;
   // For now we take whatever the OS was doing
-  state.prev_csrs.scounteren = csr_read(scounteren); // opensbi 函数
+  state.prev_csrs.scounteren = opensbi::csr_read("scounteren"); // opensbi 函数
   state.prev_csrs.sscratch = 0;
   state.prev_csrs.sepc = 0;
   state.prev_csrs.scause = 0;
@@ -274,7 +277,7 @@ fn clean_smode_csrs(state: &mut thread_state){
 
 }
 
-pub fn swap_prev_mstatus(thread: &mut thread_state, regs: &mut sbi_trap_regs, current_mstatus: usize) {
+pub fn swap_prev_mstatus(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_regs, current_mstatus: usize) {
   //Time interrupts can occur in either user mode or supervisor mode
   let mstatus_mask: usize = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP |
                             MSTATUS_MPP | MSTATUS_FS | MSTATUS_SUM |
