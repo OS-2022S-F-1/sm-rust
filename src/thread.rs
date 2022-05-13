@@ -157,10 +157,11 @@ pub fn swap_prev_state(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_
 
   unsafe {
     let prev: &[usize] = any_as_usize_slice(&thread.prev_state);
+    let regs_ptr: &[usize] = any_as_usize_slice(&regs);
     for i in 0..32 {
       let tmp: usize = prev[i];
-      prev[i] = regs[i];
-      regs[i] = tmp;
+      prev[i] = regs_ptr[i];
+      regs_ptr[i] = tmp;
     }
     
     prev[0] = !return_on_resume;
@@ -279,9 +280,7 @@ fn clean_smode_csrs(state: &mut thread_state){
 
 pub fn swap_prev_mstatus(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_regs, current_mstatus: usize) {
   //Time interrupts can occur in either user mode or supervisor mode
-  let mstatus_mask: usize = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP |
-                            MSTATUS_MPP | MSTATUS_FS | MSTATUS_SUM |
-                            MSTATUS_MXR; // opensbi
+  let mstatus_mask: usize = opensbi::MSTATUS_SIE | opensbi::MSTATUS_SPIE | opensbi::MSTATUS_SPP | opensbi::MSTATUS_MPP | opensbi::MSTATUS_FS | opensbi::MSTATUS_SUM | opensbi::MSTATUS_MXR; // opensbi
 
   let tmp: usize = thread.prev_mstatus;
   thread.prev_mstatus = (current_mstatus & !mstatus_mask) | (current_mstatus & mstatus_mask);

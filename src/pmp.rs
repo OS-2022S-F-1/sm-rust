@@ -3,6 +3,7 @@ use crate::ipi;
 use core::arch::asm;
 use crate::assert;
 use crate::opensbi;
+use crate::page;
 
 pub type region_id = i32;
 pub type pmpreg_id = i32;
@@ -15,7 +16,7 @@ pub enum pmp_priority {
 }
 
 struct ipi_msg {
-  pending: atomic_t, // opensbi
+  pending: opensbi::atomic_t, // opensbi
   perm: u8
 }
 
@@ -42,11 +43,11 @@ impl pmp_region {
 pub const PMP_N_REG: usize = 8; //number of PMP registers
 pub const PMP_MAX_N_REGION: usize = 16; //maximum number of PMP regions
 
-pub const PMP_ALL_PERM: u8 = (PMP_W | PMP_X | PMP_R); // opensbi
+pub const PMP_ALL_PERM: u8 = opensbi::PMP_W | opensbi::PMP_X | opensbi::PMP_R; // opensbi
 pub const PMP_NO_PERM: u8 = 0;
 
 /* PMP global spin locks */
-static pmp_lock: spinlock_t = SPIN_LOCK_INITIALIZER; // opensbi
+static pmp_lock: opensbi::spinlock_t = opensbi::SPIN_LOCK_INITIALIZER; // opensbi
 
 /* PMP region getter/setters */
 static regions: [pmp_region;PMP_MAX_N_REGION] = [pmp_region::new();PMP_MAX_N_REGION];
@@ -78,38 +79,66 @@ fn test_bit(bitmap: usize, n: usize) -> usize {
 }
 
 fn PMP_SET(n: usize, g: usize, addr: usize, pmpc: &mut usize) {
-  let oldcfg: usize = csr_read("pmpcfg" + g); 
-  *pmpc = oldcfg & !((0xff as usize) << 8 * (n % PMP::PMP_PER_GROUP));
-  unsafe {
-    asm!("la t0, 1f\n\t" 
-    "csrrw t0, mtvec, t0\n\t" 
-    "csrw pmpaddr"#n", %0\n\t" 
-    "csrw pmpcfg"#g", %1\n\t" 
-    "sfence.vma\n\t"
-    ".align 2\n\t" 
-    "1: csrw mtvec, t0 \n\t" 
-    : : "r" (addr), "r" (pmpc) : "t0");
-  }
-}
+  let pmpaddr_n: String = "pmpaddr".to_owned();
+  pmpaddr_n.push_str(&n.to_string());
 
-fn PMP_UNSET(n: usize, g: usize) { 
-  let pmpc: usize = opensbi::csr_read("pmpcfg" + str(g)); 
-  pmpc &= !((0xff as usize) << 8 * (*n % PMP::PMP_PER_GROUP));
+  let pmpcfg_n: String = "pmpcfg".to_owned();
+  pmpcfg_n.push_str(&n.to_string());
+
+  let pmpcfg_g: String = "pmpcfg".to_owned();
+  pmpcfg_g.push_str(&g.to_string());
+
+  let oldcfg: usize = opensbi::csr_read(&pmpcfg_g); 
+  *pmpc = oldcfg & !((0xff as usize) << 8 * (n % PMP::PMP_PER_GROUP));
+  let inst1 = format!("csrw {}, %0;", pmpaddr_n);
+  let inst2 = format!("csrw {}, %1", pmpcfg_g);
   unsafe {
     asm!(
-      "la t0, 1f \n\t"
-      "csrrw t0, mtvec, t0 \n\t"
-      "csrw pmpaddr"#n", %0\n\t"
-      "csrw pmpcfg"#g", %1\n\t"
-      "sfence.vma\n\t"
-      ".align 2\n\t" 
-      "1: csrw mtvec, t0" 
-      : : "r" (0), "r" (pmpc) : "t0"); 
+      "la t0, 1f",
+      "csrrw t0, mtvec, t0",
+      format!("csrw {}, {0}", pmpaddr_n), 
+      format!("csrw {}, {1}", pmpcfg_g),
+      "sfence.vma",
+      ".align 2", 
+      "1: csrw mtvec, t0",
+      in(reg) addr, 
+      in(reg) pmpc,
+      out("t0") _,
+    );
+  }
+  
+}
+
+fn PMP_UNSET(n: usize, g: usize) {
+  let pmpaddr_n: String = "pmpaddr".to_owned();
+  pmpaddr_n.push_str(&n.to_string());
+
+  let pmpcfg_n: String = "pmpcfg".to_owned();
+  pmpcfg_n.push_str(&n.to_string());
+
+  let pmpcfg_g: String = "pmpcfg".to_owned();
+  pmpcfg_g.push_str(&g.to_string());
+
+  let pmpc: usize = opensbi::csr_read(&pmpcfg_g); 
+  pmpc &= !((0xff as usize) << 8 * (n % PMP::PMP_PER_GROUP));
+  unsafe {
+    asm!(
+      "la t0, 1f",
+      "csrrw t0, mtvec, t0",
+      format!("csrw {}, {0}", pmpaddr_n), 
+      format!("csrw {}, {1}", pmpcfg_g),
+      "sfence.vma",
+      ".align 2", 
+      "1: csrw mtvec, t0",
+      in(reg) 0, 
+      in(reg) pmpc,
+      out("t0") _,
+    );
   }
 }
 
 fn PMP_ERROR(error: usize, msg: String) -> usize {
-  sbi_printf("%s:" + msg + "\n", __func__); // opensbi
+  println!("{}:\n", msg); // opensbi
   return error;
 }
 
@@ -172,10 +201,10 @@ pub fn pmp_region_init(start: usize, size: usize, priority: pmp_priority, rid: &
   }
 
   /* PMP granularity check */
-  if (size != usize::MAX) && (size & (RISCV_PGSIZE - 1) != 0) {
+  if (size != usize::MAX) && (size & (page::RISCV_PGSIZE - 1) != 0) {
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_NOT_PAGE_GRANULARITY, "PMP granularity is RISCV_PGSIZE".to_string());
   }
-  if (start & (RISCV_PGSIZE - 1)) != 0 {
+  if (start & (page::RISCV_PGSIZE - 1)) != 0 {
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_NOT_PAGE_GRANULARITY, "PMP granularity is RISCV_PGSIZE".to_string());
   }
 
@@ -207,9 +236,14 @@ fn detect_region_overlap(addr: usize, size: usize) -> i32 {
   
   // Safety check the addr+size
   let input_end: usize;
-  if CHECKED_ADD(addr, size, &input_end) { // detect overflow
-    return 1;
+
+  match addr.checked_add(size) {
+    Some(num) => input_end = num,
+    None => return 1
   }
+  // if CHECKED_ADD(addr, size, &input_end) { // detect overflow
+  //   return 1;
+  // }
 
   for i in 0..PMP_MAX_N_REGION {
     if is_pmp_region_valid(i as i32) == 0 {
@@ -236,8 +270,8 @@ fn tor_region_init(start: usize, size: usize, priority: pmp_priority, rid: &mut 
   let region_idx: region_id = -1;
 
   assert::sm_assert(size as usize);
-  assert::sm_assert(!(size as usize & (RISCV_PGSIZE - 1)));
-  assert::sm_assert(!(start & (RISCV_PGSIZE - 1)));
+  assert::sm_assert(!(size as usize & (page::RISCV_PGSIZE - 1)));
+  assert::sm_assert(!(start & (page::RISCV_PGSIZE - 1)));
   assert::sm_assert(*rid as usize);
   assert::sm_assert((priority != pmp_priority::PMP_PRI_BOTTOM) as usize);
 
@@ -270,7 +304,7 @@ fn tor_region_init(start: usize, size: usize, priority: pmp_priority, rid: &mut 
   }
 
   // initialize the region
-  region_init(region_idx, start, size, PMP_A_TOR, allow_overlap, reg_idx); // opensbi
+  region_init(region_idx, start, size, opensbi::PMP_A_TOR, allow_overlap, reg_idx); // opensbi
   set_bit(region_def_bitmap as usize, region_idx as usize);
   set_bit(reg_bitmap as usize, reg_idx as usize);
 
@@ -286,7 +320,7 @@ fn region_init(i: region_id, addr: usize, size: usize, addrmode: u8, allow_overl
   regions[i as usize].size = size as u64;
   regions[i as usize].addrmode = addrmode;
   regions[i as usize].allow_overlap = allow_overlap;
-  if addrmode == PMP_A_TOR && reg_idx > 0 {
+  if addrmode == opensbi::PMP_A_TOR && reg_idx > 0 {
     regions[i as usize].reg_idx = reg_idx + 1;
   }
   else {
@@ -304,8 +338,8 @@ fn napot_region_init(start: usize, size: usize, priority: pmp_priority, rid: &mu
   if !(size == (2 ^ 32 - 1) && start == 0) {
     assert::sm_assert(!(size & (size - 1)) as usize);
     assert::sm_assert(!(start & (size - 1)));
-    assert::sm_assert(!(size & (RISCV_PGSIZE - 1)) as usize);
-    assert::sm_assert(!(start & (RISCV_PGSIZE - 1)));
+    assert::sm_assert(!(size & (page::RISCV_PGSIZE - 1)) as usize);
+    assert::sm_assert(!(start & (page::RISCV_PGSIZE - 1)));
   }
 
   //find avaiable pmp region idx
@@ -343,7 +377,7 @@ fn napot_region_init(start: usize, size: usize, priority: pmp_priority, rid: &mu
   }
 
   // initialize the region
-  region_init(region_idx, start, size, PMP_A_NAPOT, allow_overlap, reg_idx);
+  region_init(region_idx, start, size, opensbi::PMP_A_NAPOT, allow_overlap, reg_idx);
   set_bit(region_def_bitmap as usize, region_idx as usize);
   set_bit(reg_bitmap as usize, reg_idx as usize);
 
@@ -351,7 +385,7 @@ fn napot_region_init(start: usize, size: usize, priority: pmp_priority, rid: &mu
 }
 
 fn region_is_tor(i: region_id) -> bool {
-  return regions[i as usize].addrmode == PMP_A_TOR;
+  return regions[i as usize].addrmode == opensbi::PMP_A_TOR;
 }
 
 fn region_needs_two_entries(i: region_id) -> i32 {
@@ -363,7 +397,7 @@ fn region_is_napot_all(i: region_id) -> bool {
 }
 
 fn region_is_napot(i: region_id) -> bool {
-  return regions[i as usize].addrmode == PMP_A_NAPOT;
+  return regions[i as usize].addrmode == opensbi::PMP_A_NAPOT;
 }
 
 fn region_pmpaddr_val(i: region_id) -> usize {
@@ -383,18 +417,18 @@ fn region_pmpaddr_val(i: region_id) -> usize {
 
 pub fn pmp_region_init_atomic(start: usize, size: usize, priority: pmp_priority, rid: &mut region_id, allow_overlap: i32) -> i32 {
   let ret: i32;
-  spin_lock(&pmp_lock);
+  opensbi::spin_lock(&pmp_lock);
   ret = pmp_region_init(start, size, priority, rid, allow_overlap); // pmp.rs
-  spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&pmp_lock);
   return ret;
 }
 
 pub fn pmp_region_free_atomic(region_idx: i32) -> i32{
-
-  spin_lock(&pmp_lock);
+  
+  opensbi::spin_lock(&pmp_lock);
 
   if is_pmp_region_valid(region_idx) == 0 {
-    spin_unlock(&pmp_lock);
+    opensbi::spin_unlock(&pmp_lock);
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index".to_string());
   }
 
@@ -407,7 +441,7 @@ pub fn pmp_region_free_atomic(region_idx: i32) -> i32{
   
   region_clear_all(region_idx);
 
-  spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&pmp_lock);
 
   return ERROR::SBI_ERR_SM_PMP_SUCCESS as i32;
 }
@@ -534,9 +568,9 @@ pub fn pmp_unset_global(region_idx: i32) -> i32 {
 
 pub fn pmp_detect_region_overlap_atomic(addr: usize, size: usize) -> i32 {
   let region_overlap: i32 = 0;
-  spin_lock(&pmp_lock); // opensbi
+  opensbi::spin_lock(&pmp_lock); // opensbi
   region_overlap = detect_region_overlap(addr, size);
-  spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&pmp_lock);
   return region_overlap;
 }
 

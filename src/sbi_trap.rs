@@ -1,73 +1,73 @@
 /** Representation of register state at time of trap/interrupt */
-struct sbi_trap_regs {
+pub struct sbi_trap_regs {
 	/** zero register state */
-	usize zero,
+	pub zero: usize,
 	/** ra register state */
-	usize ra,
+	pub ra: usize,
 	/** sp register state */
-	usize sp,
+	pub sp: usize,
 	/** gp register state */
-	usize gp,
+	pub gp: usize,
 	/** tp register state */
-	usize tp,
+	pub tp: usize,
 	/** t0 register state */
-	usize t0,
+	pub t0: usize,
 	/** t1 register state */
-	usize t1,
+	pub t1: usize,
 	/** t2 register state */
-	usize t2,
+	pub t2: usize,
 	/** s0 register state */
-	usize s0,
+	pub s0: usize,
 	/** s1 register state */
-	usize s1,
+	pub s1: usize,
 	/** a0 register state */
-	usize a0,
+	pub a0: usize,
 	/** a1 register state */
-	usize a1,
+	pub a1: usize,
 	/** a2 register state */
-	usize a2,
+	pub a2: usize,
 	/** a3 register state */
-	usize a3,
+	pub a3: usize,
 	/** a4 register state */
-	usize a4,
+	pub a4: usize,
 	/** a5 register state */
-	usize a5,
+	pub a5: usize,
 	/** a6 register state */
-	usize a6,
+	pub a6: usize,
 	/** a7 register state */
-	usize a7,
+	pub a7: usize,
 	/** s2 register state */
-	usize s2,
+	pub s2: usize,
 	/** s3 register state */
-	usize s3,
+	pub s3: usize,
 	/** s4 register state */
-	usize s4,
+	pub s4: usize,
 	/** s5 register state */
-	usize s5,
+	pub s5: usize,
 	/** s6 register state */
-	usize s6,
+	pub s6: usize,
 	/** s7 register state */
-	usize s7,
+	pub s7: usize,
 	/** s8 register state */
-	usize s8,
+	pub s8: usize,
 	/** s9 register state */
-	usize s9,
+	pub s9: usize,
 	/** s10 register state */
-	usize s10,
+	pub s10: usize,
 	/** s11 register state */
-	usize s11,
+	pub s11: usize,
 	/** t3 register state */
-	usize t3,
+	pub t3: usize,
 	/** t4 register state */
-	usize t4,
+	pub t4: usize,
 	/** t5 register state */
-	usize t5,
+	pub t5: usize,
 	/** t6 register state */
-	usize t6,
+	pub t6: usize,
 	/** mepc register state */
-	usize mepc,
+	pub mepc: usize,
 	/** mstatus register state */
-	usize mstatus,
+	pub mstatus: usize,
 	/** mstatusH register state (only for 32-bit) */
-	usize mstatusH
+	pub mstatusH: usize
 }

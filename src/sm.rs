@@ -3,6 +3,7 @@ use crate::pmp;
 use crate::error_code::ERROR;
 use crate::enclave;
 use crate::opensbi;
+use crate::platform;
 
 const SMM_BASE: usize = 0x80000000;
 const SMM_SIZE: usize = 0x200000;
@@ -57,15 +58,15 @@ const SBI_ERR_SM_PMP_REGION_INVALID: usize = 100024;
 const SBI_ERR_SM_PMP_REGION_OVERLAP: usize = 100025;
 const SBI_ERR_SM_PMP_REGION_IMPOSSIBLE_TOR: usize = 100026;
 
-static mut sm_init_done: i32 = 0;
-static mut sm_region_id: i32 = 0; 
-static mut os_region_id: i32 = 0;
+pub static mut sm_init_done: i32 = 0;
+pub static mut sm_region_id: i32 = 0; 
+pub static mut os_region_id: i32 = 0;
 
-static mut sm_hash: [u8;crypto::MDSIZE] = [0;crypto::MDSIZE];
-static mut sm_signature: [u8;crypto::SIGNATURE_SIZE] = [0;crypto::SIGNATURE_SIZE];
-static mut sm_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
-static mut sm_private_key: [u8;crypto::PRIVATE_KEY_SIZE] = [0;crypto::PRIVATE_KEY_SIZE];
-static mut dev_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
+pub static mut sm_hash: [u8;crypto::MDSIZE] = [0;crypto::MDSIZE];
+pub static mut sm_signature: [u8;crypto::SIGNATURE_SIZE] = [0;crypto::SIGNATURE_SIZE];
+pub static mut sm_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
+pub static mut sm_private_key: [u8;crypto::PRIVATE_KEY_SIZE] = [0;crypto::PRIVATE_KEY_SIZE];
+pub static mut dev_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
 
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
   ::std::slice::from_raw_parts(
@@ -158,8 +159,8 @@ pub fn sm_derive_sealing_key(key: &mut [u8], key_ident: &[u8], key_ident_size: u
   let info: usize;
 
   // opensbi 函数
-  opensbi::sbi_memcpy(info, enclave_hash, crypto::MDSIZE);
-  opensbi::sbi_memcpy(info + crypto::MDSIZE, key_ident, key_ident_size);
+  opensbi::sbi_memcpy(info, enclave_hash.as_ptr() as usize, crypto::MDSIZE);
+  opensbi::sbi_memcpy(info + crypto::MDSIZE, key_ident.as_ptr() as usize, key_ident_size);
 
   /*
   * The key is derived without a salt because we have no entropy source
@@ -167,21 +168,22 @@ pub fn sm_derive_sealing_key(key: &mut [u8], key_ident: &[u8], key_ident_size: u
   */
   unsafe {
     let info_ptr: &[u8] = any_as_u8_slice(&info);
-    return crypto::kdf(0, &sm_private_key, info_ptr, key);
+    return crypto::kdf(&mut [0], &sm_private_key, info_ptr, key);
   }
 }
 
-pub fn sm_sign(signature: &[u8], const void* data, len: usize) {
+pub fn sm_sign(signature: &[u8], data: &[u8], len: usize) {
   crypt::sign(, data, len, sm_public_key, sm_private_key);
 }
 
 fn sm_copy_key() {
   // opensbi
-  opensbi::sbi_memcpy(sm_hash, sanctum_sm_hash, crypto::MDSIZE);
-  opensbi::sbi_memcpy(sm_signature, sanctum_sm_signature, crypto::SIGNATURE_SIZE);
-  opensbi::sbi_memcpy(sm_public_key, sanctum_sm_public_key, crypto::PUBLIC_KEY_SIZE);
-  opensbi::sbi_memcpy(sm_private_key, sanctum_sm_secret_key, crypto::PRIVATE_KEY_SIZE);
-  opensbi::sbi_memcpy(dev_public_key, sanctum_dev_public_key, crypto::PUBLIC_KEY_SIZE);
+
+  opensbi::sbi_memcpy(&sm_hash as *const u8 as usize, sanctum_sm_hash, crypto::MDSIZE);
+  opensbi::sbi_memcpy(&sm_signature as *const u8 as usize, sanctum_sm_signature, crypto::SIGNATURE_SIZE);
+  opensbi::sbi_memcpy(&sm_public_key as *const u8 as usize, sanctum_sm_public_key, crypto::PUBLIC_KEY_SIZE);
+  opensbi::sbi_memcpy(&sm_private_key as *const u8 as usize, sanctum_sm_secret_key, crypto::PRIVATE_KEY_SIZE);
+  opensbi::sbi_memcpy(&dev_public_key as *const u8 as usize, sanctum_dev_public_key, crypto::PUBLIC_KEY_SIZE);
 }
 
 fn sm_print_hash() {
@@ -200,7 +202,7 @@ fn sm_init(cold_boot: bool) {
     println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
 
     // opensbi
-    sbi_ecall_register_extension(&ecall_keystone_enclave);
+    opensbi::sbi_ecall_register_extension(&ecall_keystone_enclave);
 
     sm_region_id = smm_init();
     if sm_region_id < 0 {
@@ -216,7 +218,7 @@ fn sm_init(cold_boot: bool) {
       opensbi::sbi_hart_hang();
     }
 
-    if (platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS) {
+    if platform::platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS {
       println!("[SM] platform global init fatal error");
       opensbi::sbi_hart_hang();
     }
@@ -241,7 +243,7 @@ fn sm_init(cold_boot: bool) {
   pmp::pmp_set_keystone(os_region_id, pmp::PMP_ALL_PERM);
 
   /* Fire platform specific global init */
-  if platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
+  if platform::platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
     // opensbi
     println!("[SM] platform global init fatal error");
     opensbi::sbi_hart_hang();

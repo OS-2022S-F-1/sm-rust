@@ -1,6 +1,5 @@
 use core::arch::asm;
-
-pub const MSTATUS_MPP_SHIFT: usize = 11;
+use crate::sbi_trap;
 
 pub const SATP_MODE_OFF: usize = 0;
 pub const SATP_MODE_SV32: usize = 1;
@@ -16,6 +15,62 @@ pub const HGATP_MODE_SV48X4: usize = 9;
 
 pub const PAGE_SHIFT: usize = 12;
 pub const PAGE_SIZE: usize = 1 << PAGE_SHIFT;
+
+pub const PMP_R: u8 = 0x01;
+pub const PMP_W: u8 = 0x02;
+pub const PMP_X: u8 = 0x04;
+pub const PMP_A: u8 = 0x18;
+pub const PMP_A_TOR: u8 = 0x08;
+pub const PMP_A_NA4: u8 = 0x10;
+pub const PMP_A_NAPOT: u8 = 0x18;
+pub const PMP_L: u8 = 0x80;
+
+pub const IRQ_S_SOFT: usize = 1;
+pub const IRQ_VS_SOFT: usize = 2;
+pub const IRQ_M_SOFT: usize = 3;
+pub const IRQ_S_TIMER: usize = 5;
+pub const IRQ_VS_TIMER: usize = 6;
+pub const IRQ_M_TIMER: usize = 7;
+pub const IRQ_S_EXT: usize = 9;
+pub const IRQ_VS_EXT: usize = 10;
+pub const IRQ_M_EXT: usize = 11;
+pub const IRQ_S_GEXT: usize = 12;
+pub const IRQ_PMU_OVF: usize = 13;
+
+pub const MIP_SSIP: usize = (1 << IRQ_S_SOFT);
+pub const MIP_VSSIP: usize = (1 << IRQ_VS_SOFT);
+pub const MIP_MSIP: usize = (1 << IRQ_M_SOFT);
+pub const MIP_STIP: usize = (1 << IRQ_S_TIMER);
+pub const MIP_VSTIP: usize = (1 << IRQ_VS_TIMER);
+pub const MIP_MTIP: usize = (1 << IRQ_M_TIMER);
+pub const MIP_SEIP: usize = (1 << IRQ_S_EXT);
+pub const MIP_VSEIP: usize = (1 << IRQ_VS_EXT);
+pub const MIP_MEIP: usize = (1 << IRQ_M_EXT);
+pub const MIP_SGEIP: usize = (1 << IRQ_S_GEXT);
+pub const MIP_LCOFIP: usize = (1 << IRQ_PMU_OVF);
+
+/* clang-format off */
+pub const MSTATUS_SIE: usize = 0x00000002;
+pub const MSTATUS_MIE: usize = 0x00000008;
+pub const MSTATUS_SPIE_SHIFT: usize = 5;
+pub const MSTATUS_SPIE: usize = (1 << MSTATUS_SPIE_SHIFT);
+pub const MSTATUS_UBE: usize = 0x00000040;
+pub const MSTATUS_MPIE: usize = 0x00000080;
+pub const MSTATUS_SPP_SHIFT: usize = 8;
+pub const MSTATUS_SPP: usize = (1 << MSTATUS_SPP_SHIFT);
+pub const MSTATUS_MPP_SHIFT: usize = 11;
+pub const MSTATUS_MPP: usize = (3 << MSTATUS_MPP_SHIFT);
+pub const MSTATUS_FS: usize = 0x00006000;
+pub const MSTATUS_XS: usize = 0x00018000;
+pub const MSTATUS_VS: usize = 0x01800000;
+pub const MSTATUS_MPRV: usize = 0x00020000;
+pub const MSTATUS_SUM: usize = 0x00040000;
+pub const MSTATUS_MXR: usize = 0x00080000;
+pub const MSTATUS_TVM: usize = 0x00100000;
+pub const MSTATUS_TW: usize = 0x00200000;
+pub const MSTATUS_TSR: usize = 0x00400000;
+pub const MSTATUS32_SD: usize = 0x80000000;
+
 
 #[cfg(target_pointer_width = "64")]
 pub mod Const {
@@ -35,6 +90,8 @@ pub mod Const {
 	pub const HGATP_VMID_SHIFT: usize = HGATP64_VMID_SHIFT;
 	pub const HGATP_VMID_MASK: usize = HGATP64_VMID_MASK;
 	pub const HGATP_MODE_SHIFT: usize = HGATP64_MODE_SHIFT;
+
+	pub const BITS_PER_LONG: usize = 64;
 }
 
 #[cfg(target_pointer_width = "32")]
@@ -55,6 +112,40 @@ pub mod Const {
 	pub const HGATP_VMID_SHIFT: usize = HGATP32_VMID_SHIFT;
 	pub const HGATP_VMID_MASK: usize = HGATP32_VMID_MASK;
 	pub const HGATP_MODE_SHIFT: usize = HGATP32_MODE_SHIFT;
+
+	pub const BITS_PER_LONG: usize = 32;
+}
+
+pub const TICKET_SHIFT: usize = 16;
+
+#[repr(align(4))]
+#[cfg(target_endian = "big")]
+pub struct spinlock_t {
+	pub next: u16,
+    pub owner: u16
+}
+
+#[repr(align(4))]
+#[cfg(target_endian = "little")]
+pub struct spinlock_t {
+	pub owner: u16,
+	pub next: u16
+}
+
+impl spinlock_t {
+	pub fn new() -> Self {
+		Self {
+		next: 0,
+		owner: 0
+		}
+	}
+}
+
+unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
+	::std::slice::from_raw_parts(
+		(p as *const T) as *const u8,
+		::std::mem::size_of::<T>(),
+	)
 }
 
 
@@ -67,111 +158,161 @@ pub mod Const {
  */
 const SBI_HARTMASK_MAX_BITS: usize = 128;
 
+fn BITS_TO_LONGS(nbits: usize) -> usize {
+	return ((nbits) + Const::BITS_PER_LONG - 1) / Const::BITS_PER_LONG;
+}
+
 /** Representation of hartmask */
 struct sbi_hartmask {
-	DECLARE_BITMAP(bits, SBI_HARTMASK_MAX_BITS);
+	pub name: [usize;((SBI_HARTMASK_MAX_BITS) + Const::BITS_PER_LONG - 1) / Const::BITS_PER_LONG]
+}
+
+pub struct atomic_t {
+	counter: usize
 }
 
 
 pub struct sbi_tlb_info {
-	start: usize,
-	size: usize,
-	asid: usize,
-	vmid: usize,
-	void (*local_fn)(struct sbi_tlb_info *tinfo);
-	struct sbi_hartmask smask;
+	pub start: usize,
+	pub size: usize,
+	pub asid: usize,
+	pub vmid: usize,
+	pub local_fn: fn(*mut sbi_tlb_info),
+	pub smask: sbi_hartmask
 }
 
-pub fn SBI_TLB_INFO_INIT(__p, __start, __size, __asid, __vmid, __lfn, __src) { 
-	(__p)->start = (__start); \
-	(__p)->size = (__size); \
-	(__p)->asid = (__asid); \
-	(__p)->vmid = (__vmid); \
-	(__p)->local_fn = (__lfn); \
-	SBI_HARTMASK_INIT_EXCEPT(&(__p)->smask, (__src)); \
-} while (0)
-
-pub fn csr_read(csr: &str) -> usize {
-	let __v: usize;
-	__asm__ __volatile__("csrr %0, " __ASM_STR(csr)
-				     : "=r"(__v)                
-				     :                          
-				     : "memory");               
-		__v;
+fn RISCV_FENCE(p: &str, s: &str) {
+	// __asm__ __volatile__ ("fence " #p "," #s : : : "memory")
 	unsafe {
 		asm!(
-			"csrr %0, {csr}",
-			
+			format!("fence {}, {}", p, s),
 		);
 	}
 }
 
+pub fn csr_read(csr: &str) -> usize {
+	let __v: usize;
+	// __asm__ __volatile__("csrr %0, " __ASM_STR(csr)
+	// 			     : "=r"(__v)                
+	// 			     :                          
+	// 			     : "memory");               
+	//  __v;
+	unsafe {
+		asm!(
+			format!("csrr {0}, {}", csr),
+			out(reg) __v
+		);
+	}
+	__v
+}
+
 pub fn csr_write(csr: &str, val: usize) {
 	let __v: usize = val;
-	__asm__ __volatile__("csrw " __ASM_STR(csr) ", %0"
-				:
-				: "rK"(__v)
-				: "memory");
+	// __asm__ __volatile__("csrw " __ASM_STR(csr) ", %0"
+	// 			:
+	// 			: "rK"(__v)
+	// 			: "memory");
+	unsafe {
+		asm!(
+			format!("csrw {}, {0}", csr),
+			in(reg) __v
+		);
+	}
 }
 
 pub fn csr_clear(csr: &str, val: usize) {
 	let __v: usize = val;
-	__asm__ __volatile__("csrc " __ASM_STR(csr) ", %0"
-					:
-					: "rK"(__v)
-					: "memory");
+	// __asm__ __volatile__("csrc " __ASM_STR(csr) ", %0"
+	// 				:
+	// 				: "rK"(__v)
+	// 				: "memory");
+	unsafe {
+		asm!(
+			format!("csrc {}, {0}", csr),
+			in(reg) __v
+		);
+	}
 }
 
 pub fn csr_set(csr: &str, val: usize) {
 	let __v: usize = val;
-	__asm__ __volatile__("csrs " __ASM_STR(csr) ", %0"
-					:
-					: "rK"(__v)
-					: "memory");
+	// __asm__ __volatile__("csrs " __ASM_STR(csr) ", %0"
+	// 				:
+	// 				: "rK"(__v)
+	// 				: "memory");
+	unsafe {
+		asm!(
+			format!("csrs {}, {0}", csr),
+			in(reg) __v
+		);
+	}
 }
 
 
-pub fn spin_lock(spinlock_t *lock) {
-	let inc: usize = 1u << TICKET_SHIFT;
-	let mask: usize = 0xffffu;
+pub fn spin_lock(lock: *const spinlock_t) {
+	let inc: usize = 1 << TICKET_SHIFT;
+	let mask: usize = 0xffff;
 	let l0: u32;
 	let tmp1: u32;
 	let tmp2: u32;
 
-	__asm__ __volatile__(
-		/* Atomically increment the next ticket. */
-		"	amoadd.w.aqrl	%0, %4, %3\n"
+	// __asm__ __volatile__(
+	// 	/* Atomically increment the next ticket. */
+	// 	"	amoadd.w.aqrl	%0, %4, %3\n"
 
-		/* Did we get the lock? */
-		"	srli	%1, %0, %6\n"
-		"	and	%1, %1, %5\n"
-		"1:	and	%2, %0, %5\n"
-		"	beq	%1, %2, 2f\n"
+	// 	/* Did we get the lock? */
+	// 	"	srli	%1, %0, %6\n"
+	// 	"	and	%1, %1, %5\n"
+	// 	"1:	and	%2, %0, %5\n"
+	// 	"	beq	%1, %2, 2f\n"
 
-		/* If not, then spin on the lock. */
-		"	lw	%0, %3\n"
-		RISCV_ACQUIRE_BARRIER
-		"	j	1b\n"
-		"2:"
-		: "=&r"(l0), "=&r"(tmp1), "=&r"(tmp2), "+A"(*lock)
-		: "r"(inc), "r"(mask), "I"(TICKET_SHIFT)
-		: "memory");
+	// 	/* If not, then spin on the lock. */
+	// 	"	lw	%0, %3\n"
+	// 	RISCV_ACQUIRE_BARRIER
+	// 	"	j	1b\n"
+	// 	"2:"
+	// 	: "=&r"(l0), "=&r"(tmp1), "=&r"(tmp2), "+A"(*lock)
+	// 	: "r"(inc), "r"(mask), "I"(TICKET_SHIFT)
+	// 	: "memory");
+	unsafe {
+		asm!(
+			/* Atomically increment the next ticket. */
+			" amoadd.w.aqrl {0}, {4}, {3}",
+			
+			/* Did we get the lock? */
+			" srli {1}, {0}, {6}",
+			" and {1}, {1}, {5}",
+			"1:	and	{2}, {0}, {5}",
+			" beq {1}, {2}, 2f",
+
+			/* If not, then spin on the lock. */
+			" lw {0}, {3}",
+			" fence r , rw",
+			" j 1b",
+			"2:",
+			out(reg) l0,
+			out(reg) tmp1,
+			out(reg) tmp2,
+			inout(reg) *lock,
+			in(reg) inc,
+			in(reg) mask,
+			in(reg) TICKET_SHIFT
+		);
+	}
 }
 
-// fn spin_unlock(spinlock_t* lock) {
-// 	__smp_store_release(&lock->owner, lock->owner + 1);
-// }
+pub fn __smp_store_release(p: *mut u16, v: u16) { 
+	RISCV_FENCE("rw", "w");
+	*(p) = v;
+}
 
-// fn sbi_trap_exit(regs: &mut sbi_trap_regs) {
-// 	let scratch: sbi_scratch = sbi_scratch_thishart_ptr();
-
-// 	((trap_exit_t)scratch->trap_exit)(regs);
-// 	__builtin_unreachable();
-// }
+pub fn spin_unlock(lock: *mut spinlock_t) {
+	__smp_store_release(&mut (*lock).owner, (*lock).owner + 1);
+}
 
 /* Get current HART id */
 pub fn current_hartid() -> usize { 
-	csr_read("CSR_MHARTID")
+	csr_read("mhartid")
 }
 
 pub fn sbi_hart_hang() {
@@ -179,27 +320,25 @@ pub fn sbi_hart_hang() {
 	loop {
 		wfi();
 	}
-	__builtin_unreachable();
+	unreachable!("Unreachable!");
 }
 
-pub fn sbi_memset(void *s, int c, size_t count) -> usize {
-	char *temp = s;
+pub fn sbi_memset(s: usize, c: u8, count: usize) -> usize {
+	let temp: &[u8] = any_as_u8_slice(&s);
 
-	while (count > 0) {
-		count--;
-		*temp++ = c;
+	for i in 0..count {
+		temp[i] = c;
 	}
 
 	return s;
 }
 
-pub fn sbi_memcpy(void *dest, const void *src, size_t count) -> usize {
-	char *temp1 = dest;
-	const char *temp2 = src;
-
-	while (count > 0) {
-		*temp1++ = *temp2++;
-		count--;
+pub fn sbi_memcpy(dest: usize, src: usize, count: usize) -> usize {
+	let temp1: &[u8] = any_as_u8_slice(&dest);
+	let temp2: &[u8] = any_as_u8_slice(&src);
+	
+	for i in 0..count {
+		temp1[i] = temp2[i];
 	}
 
 	return dest;
@@ -212,7 +351,75 @@ pub fn sbi_domain_thishart_ptr() {
 
 /* Read & Write Memory barrier */
 pub fn mb() { 
-	RISCV_FENCE(iorw,iorw);
+	RISCV_FENCE("iorw", "iorw");
+}
+
+/** Get pointer to sbi_scratch for current HART */
+fn sbi_scratch_thishart_ptr() -> *mut sbi_scratch {
+	return csr_read("mscratch") as *mut sbi_scratch;
+}
+
+/** Representation of per-HART scratch space */
+struct sbi_scratch {
+	/** Start (or base) address of firmware linked to OpenSBI library */
+    fw_start: usize,
+    /** Size (in bytes) of firmware linked to OpenSBI library */
+    fw_size: usize,
+    /** Arg1 (or 'a1' register) of next booting stage for this HART */
+    next_arg1: usize,
+    /** Address of next booting stage for this HART */
+    next_addr: usize,
+    /** Priviledge mode of next booting stage for this HART */
+    next_mode: usize,
+    /** Warm boot entry point address for this HART */
+    warmboot_addr: usize,
+    /** Address of sbi_platform */
+    platform_addr: usize,
+    /** Address of HART ID to sbi_scratch conversion function */
+    hartid_to_scratch: usize,
+    /** Address of trap exit function */
+    trap_exit: usize,
+    /** Temporary storage */
+    tmp0: usize,
+    /** Options for OpenSBI library */
+    options: usize,
+}
+
+/**
+ * As this this function only handlers scalar values of hart mask, it must be
+ * set to all online harts if the intention is to send IPIs to all the harts.
+ * If hmask is zero, no IPIs will be sent.
+ */
+fn sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data) -> i32 {
+	int rc;
+	ulong i, m;
+	struct sbi_domain *dom = sbi_domain_thishart_ptr();
+	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+
+	if (hbase != -1UL) {
+		rc = sbi_hsm_hart_interruptible_mask(dom, hbase, &m);
+		if (rc)
+			return rc;
+		m &= hmask;
+
+		/* Send IPIs */
+		for (i = hbase; m; i++, m >>= 1) {
+			if (m & 1UL)
+				sbi_ipi_send(scratch, i, event, data);
+		}
+	} else {
+		hbase = 0;
+		while (!sbi_hsm_hart_interruptible_mask(dom, hbase, &m)) {
+			/* Send IPIs */
+			for (i = hbase; m; i++, m >>= 1) {
+				if (m & 1UL)
+					sbi_ipi_send(scratch, i, event, data);
+			}
+			hbase += BITS_PER_LONG;
+		}
+	}
+
+	return 0;
 }
 
 /**
@@ -224,11 +431,43 @@ pub fn mb() {
  *
  * @param regs pointer to register state
  */
-pub fn sbi_trap_exit(const struct sbi_trap_regs *regs) {
-	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+pub fn sbi_trap_exit(regs: *mut sbi_trap::sbi_trap_regs) {
+	let scratch: *mut sbi_scratch = sbi_scratch_thishart_ptr();
 
-	((trap_exit_t)scratch->trap_exit)(regs);
-	__builtin_unreachable();
+	((trap_exit_t)(*scratch).trap_exit)(regs);
+	unreachable!("Unreachable!");
+}
+
+pub fn sbi_tlb_request(hmask: usize, hbase: usize, tinfo: *mut sbi_tlb_info) -> i32
+{
+	if !(*tinfo).local_fn {
+		return ERROR::SBI_ERR_INVALID_PARAM;
+	}
+
+	tlb_pmu_incr_fw_ctr(tinfo);
+
+	return sbi_ipi_send_many(hmask, hbase, tlb_event, tinfo);
+}
+
+fn bitmap_zero_except(dst: *mut usize, exception: usize, nbits: usize) {
+	if small_const_nbits(nbits) {
+		*dst = 0;
+	}
+	else {
+		let i: usize;
+		let len: usize = BITS_TO_LONGS(nbits);
+		for i in 0..len {
+			dst[i] = 0;
+		}
+	}
+	if exception < nbits {
+		__set_bit(exception, dst);
+	}
+}
+
+// /** Initialize hartmask to zero except a particular HART id */
+pub fn SBI_HARTMASK_INIT_EXCEPT(__m: sbi_hartmask, __h: usize)	{
+	bitmap_zero_except((__m).bits, __h, SBI_HARTMASK_MAX_BITS)
 }
 
 // typedef struct {
@@ -241,14 +480,75 @@ pub fn sbi_trap_exit(const struct sbi_trap_regs *regs) {
 // 	#endif
 // 	} __aligned(4) spinlock_t;
 	
-// 	#define __SPIN_LOCK_UNLOCKED	\
+// 	pub const __SPIN_LOCK_UNLOCKED	\
 // 		(spinlock_t) { 0, 0 }
 	
-// 	#define SPIN_LOCK_INIT(x)	\
+// 	pub const SPIN_LOCK_INIT(x)	\
 // 		x = __SPIN_LOCK_UNLOCKED
 	
-// 	#define SPIN_LOCK_INITIALIZER	\
+// 	pub const SPIN_LOCK_INITIALIZER	\
 // 		__SPIN_LOCK_UNLOCKED
 	
-// 	#define DEFINE_SPIN_LOCK(x)	\
-// 		spinlock_t SPIN_LOCK_INIT(x)
+// 	pub const DEFINE_SPIN_LOCK(x)	\
+// 		spinlock_t SPIN_LOCK_INIT(x)\
+
+
+/**
+ * Get ulong HART mask for given HART base ID
+ * @param scratch the per-HART scratch pointer
+ * @param hbase the HART base ID
+ * @param out_hmask the output ulong HART mask
+ * @return 0 on success and SBI_Exxx (< 0) on failure
+ * Note: the output HART mask will be set to zero on failure as well.
+ */
+pub fn sbi_hsm_hart_started_mask(scratch: sbi_scratch,
+	usize hbase, usize *out_hmask) -> i32 {
+	let i: usize;
+	let hcount: usize = sbi_platform_hart_count(sbi_platform_ptr(scratch));
+  
+	/*
+	* The SBI_HARTMASK_MAX_BITS represents the maximum HART ids generic
+	* OpenSBI can handle whereas sbi_platform_hart_count() represents
+	* the maximum HART ids (or HARTs) on underlying platform.
+	*
+	* Currently, we only support continuous HART ids so this function
+	* is written with same assumption. In future, this function will
+	* change when we support discontinuous and sparse HART ids.
+	*/
+  
+	*out_hmask = 0;
+	if hcount <= hbase {
+		return SBI_EINVAL;
+	}
+	if BITS_PER_LONG < (hcount - hbase) {
+		hcount = BITS_PER_LONG;
+	}
+  
+	for (i = hbase; i < hcount; i++) {
+	if (sbi_hsm_hart_get_state(scratch, i) == SBI_HART_STARTED)
+	*out_hmask |= 1UL << (i - hbase);
+	}
+  
+	return 0;
+}
+
+pub fn sbi_ecall_register_extension(struct sbi_ecall_extension *ext) -> i32 {
+	struct sbi_ecall_extension *t;
+
+	if (!ext || (ext->extid_end < ext->extid_start) || !ext->handle)
+		return SBI_EINVAL;
+
+	sbi_list_for_each_entry(t, &ecall_exts_list, head) {
+		unsigned long start = t->extid_start;
+		unsigned long end = t->extid_end;
+		if (end < ext->extid_start || ext->extid_end < start)
+			/* no overlap */;
+		else
+			return SBI_EINVAL;
+	}
+
+	SBI_INIT_LIST_HEAD(&ext->head);
+	sbi_list_add_tail(&ext->head, &ecall_exts_list);
+
+	return 0;
+}

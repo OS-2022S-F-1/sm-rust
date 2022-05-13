@@ -17,8 +17,6 @@ struct mprv_block {
 const REGBYTES: usize = 1 << log::LOG_REGBYTES;
 const MPRV_BLOCK: usize = REGBYTES * 8;
 
-
-
 pub fn copy_from_sm(dst: usize, src: usize, len: usize) -> i32 {
     
     unsafe {
@@ -34,7 +32,7 @@ pub fn copy_from_sm(dst: usize, src: usize, len: usize) -> i32 {
                 dst += MPRV_BLOCK;
                 len -= MPRV_BLOCK;
             }
-    
+
             while len >= REGBYTES {
                 let res: i32 = copy_word_from_sm(dst, src as *const usize); // mprv.s
                 if res != 0 {
