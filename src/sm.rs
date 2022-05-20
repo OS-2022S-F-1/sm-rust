@@ -194,67 +194,67 @@ fn sm_print_hash() {
   println!("\n");
 }
 
-fn sm_init(cold_boot: bool) {
-	// initialize SMM
-  if cold_boot {
-    /* only the cold-booting hart will execute these */
-    // opensbi
-    println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
+// fn sm_init(cold_boot: bool) {
+// 	// initialize SM
+//   if cold_boot {
+//     /* only the cold-booting hart will execute these */
+//     // opensbi
+//     println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
 
-    // opensbi
-    opensbi::sbi_ecall_register_extension(&ecall_keystone_enclave);
+//     // opensbi
+//     opensbi::sbi_ecall_register_extension(&ecall_keystone_enclave);
 
-    sm_region_id = smm_init();
-    if sm_region_id < 0 {
-      // opensbi
-      println!("[SM] intolerable error - failed to initialize SM memory");
-      opensbi::sbi_hart_hang();
-    }
+//     sm_region_id = smm_init();
+//     if sm_region_id < 0 {
+//       // opensbi
+//       println!("[SM] intolerable error - failed to initialize SM memory");
+//       opensbi::sbi_hart_hang();
+//     }
 
-    os_region_id = osm_init();
-    if os_region_id < 0 {
-      // opensbi
-      println!("[SM] intolerable error - failed to initialize OS memory");
-      opensbi::sbi_hart_hang();
-    }
+//     os_region_id = osm_init();
+//     if os_region_id < 0 {
+//       // opensbi
+//       println!("[SM] intolerable error - failed to initialize OS memory");
+//       opensbi::sbi_hart_hang();
+//     }
 
-    if platform::platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS {
-      println!("[SM] platform global init fatal error");
-      opensbi::sbi_hart_hang();
-    }
-    // Copy the keypair from the root of trust
-    sm_copy_key();
+//     if platform::platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS {
+//       println!("[SM] platform global init fatal error");
+//       opensbi::sbi_hart_hang();
+//     }
+//     // Copy the keypair from the root of trust
+//     sm_copy_key();
 
-    // Init the enclave metadata
-    enclave::enclave_init_metadata(); // enclave.rs
+//     // Init the enclave metadata
+//     enclave::enclave_init_metadata(); // enclave.rs
 
-    sm_init_done = 1;
-    opensbi::mb(); // opensbi
-  }
+//     sm_init_done = 1;
+//     opensbi::mb(); // opensbi
+//   }
 
-  /* wait until cold-boot hart finishes */
-  while sm_init_done == 0 {
-    opensbi::mb(); // opensbi
-  }
+//   /* wait until cold-boot hart finishes */
+//   while sm_init_done == 0 {
+//     opensbi::mb(); // opensbi
+//   }
 
-  /* below are executed by all harts */
-  pmp::pmp_init();
-  pmp::pmp_set_keystone(sm_region_id, pmp::PMP_NO_PERM);
-  pmp::pmp_set_keystone(os_region_id, pmp::PMP_ALL_PERM);
+//   /* below are executed by all harts */
+//   pmp::pmp_init();
+//   pmp::pmp_set_keystone(sm_region_id, pmp::PMP_NO_PERM);
+//   pmp::pmp_set_keystone(os_region_id, pmp::PMP_ALL_PERM);
 
-  /* Fire platform specific global init */
-  if platform::platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
-    // opensbi
-    println!("[SM] platform global init fatal error");
-    opensbi::sbi_hart_hang();
-  }
+//   /* Fire platform specific global init */
+//   if platform::platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
+//     // opensbi
+//     println!("[SM] platform global init fatal error");
+//     opensbi::sbi_hart_hang();
+//   }
 
-  // opensbi
-  println!("[SM] Keystone security monitor has been initialized!\n");
+//   // opensbi
+//   println!("[SM] Keystone security monitor has been initialized!\n");
 
-  sm_print_hash();
+//   sm_print_hash();
 
-  return;
-  // for debug
-  // sm_print_cert();
-}
+//   return;
+//   // for debug
+//   // sm_print_cert();
+// }

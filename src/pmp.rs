@@ -47,7 +47,7 @@ pub const PMP_ALL_PERM: u8 = opensbi::PMP_W | opensbi::PMP_X | opensbi::PMP_R; /
 pub const PMP_NO_PERM: u8 = 0;
 
 /* PMP global spin locks */
-static pmp_lock: opensbi::spinlock_t = opensbi::SPIN_LOCK_INITIALIZER; // opensbi
+static pmp_lock: opensbi::spinlock_t = opensbi::SPIN_LOCK_INITIALIZER(); // opensbi
 
 /* PMP region getter/setters */
 static regions: [pmp_region;PMP_MAX_N_REGION] = [pmp_region::new();PMP_MAX_N_REGION];
@@ -417,18 +417,18 @@ fn region_pmpaddr_val(i: region_id) -> usize {
 
 pub fn pmp_region_init_atomic(start: usize, size: usize, priority: pmp_priority, rid: &mut region_id, allow_overlap: i32) -> i32 {
   let ret: i32;
-  opensbi::spin_lock(&pmp_lock);
+  opensbi::spin_lock(&mut pmp_lock);
   ret = pmp_region_init(start, size, priority, rid, allow_overlap); // pmp.rs
-  opensbi::spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&mut pmp_lock);
   return ret;
 }
 
 pub fn pmp_region_free_atomic(region_idx: i32) -> i32{
   
-  opensbi::spin_lock(&pmp_lock);
+  opensbi::spin_lock(&mut pmp_lock);
 
   if is_pmp_region_valid(region_idx) == 0 {
-    opensbi::spin_unlock(&pmp_lock);
+    opensbi::spin_unlock(&mut pmp_lock);
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index".to_string());
   }
 
@@ -441,7 +441,7 @@ pub fn pmp_region_free_atomic(region_idx: i32) -> i32{
   
   region_clear_all(region_idx);
 
-  opensbi::spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&mut pmp_lock);
 
   return ERROR::SBI_ERR_SM_PMP_SUCCESS as i32;
 }
@@ -568,9 +568,9 @@ pub fn pmp_unset_global(region_idx: i32) -> i32 {
 
 pub fn pmp_detect_region_overlap_atomic(addr: usize, size: usize) -> i32 {
   let region_overlap: i32 = 0;
-  opensbi::spin_lock(&pmp_lock); // opensbi
+  opensbi::spin_lock(&mut pmp_lock); // opensbi
   region_overlap = detect_region_overlap(addr, size);
-  opensbi::spin_unlock(&pmp_lock);
+  opensbi::spin_unlock(&mut pmp_lock);
   return region_overlap;
 }
 

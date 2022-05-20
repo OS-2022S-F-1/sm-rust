@@ -135,8 +135,8 @@ pub struct spinlock_t {
 impl spinlock_t {
 	pub fn new() -> Self {
 		Self {
-		next: 0,
-		owner: 0
+			next: 0,
+			owner: 0
 		}
 	}
 }
@@ -144,6 +144,13 @@ impl spinlock_t {
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
 	::std::slice::from_raw_parts(
 		(p as *const T) as *const u8,
+		::std::mem::size_of::<T>(),
+	)
+}
+
+unsafe fn any_as_usize_slice<T: Sized>(p: &T) -> &[usize] {
+	::std::slice::from_raw_parts(
+		(p as *const T) as *const usize,
 		::std::mem::size_of::<T>(),
 	)
 }
@@ -164,7 +171,7 @@ fn BITS_TO_LONGS(nbits: usize) -> usize {
 
 /** Representation of hartmask */
 struct sbi_hartmask {
-	pub name: [usize;((SBI_HARTMASK_MAX_BITS) + Const::BITS_PER_LONG - 1) / Const::BITS_PER_LONG]
+	pub bits: [usize;((SBI_HARTMASK_MAX_BITS) + Const::BITS_PER_LONG - 1) / Const::BITS_PER_LONG]
 }
 
 pub struct atomic_t {
@@ -249,7 +256,7 @@ pub fn csr_set(csr: &str, val: usize) {
 }
 
 
-pub fn spin_lock(lock: *const spinlock_t) {
+pub fn spin_lock(lock: &mut spinlock_t) {
 	let inc: usize = 1 << TICKET_SHIFT;
 	let mask: usize = 0xffff;
 	let l0: u32;
@@ -301,13 +308,13 @@ pub fn spin_lock(lock: *const spinlock_t) {
 	}
 }
 
-pub fn __smp_store_release(p: *mut u16, v: u16) { 
+pub fn __smp_store_release(p: &mut u16, v: u16) { 
 	RISCV_FENCE("rw", "w");
-	*(p) = v;
+	*p = v;
 }
 
-pub fn spin_unlock(lock: *mut spinlock_t) {
-	__smp_store_release(&mut (*lock).owner, (*lock).owner + 1);
+pub fn spin_unlock(lock: &mut spinlock_t) {
+	__smp_store_release(&mut (lock).owner, (lock).owner + 1);
 }
 
 /* Get current HART id */
@@ -344,10 +351,10 @@ pub fn sbi_memcpy(dest: usize, src: usize, count: usize) -> usize {
 	return dest;
 }
 
-/** Get pointer to sbi_domain for current HART */
-pub fn sbi_domain_thishart_ptr() {
-	sbi_hartid_to_domain(current_hartid())
-}
+// /** Get pointer to sbi_domain for current HART */
+// pub fn sbi_domain_thishart_ptr() {
+// 	sbi_hartid_to_domain(current_hartid())
+// }
 
 /* Read & Write Memory barrier */
 pub fn mb() { 
@@ -378,7 +385,7 @@ struct sbi_scratch {
     /** Address of HART ID to sbi_scratch conversion function */
     hartid_to_scratch: usize,
     /** Address of trap exit function */
-    trap_exit: usize,
+    trap_exit: fn(*mut sbi_trap::sbi_trap_regs),
     /** Temporary storage */
     tmp0: usize,
     /** Options for OpenSBI library */
@@ -433,15 +440,15 @@ fn sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data) -> i32 {
  */
 pub fn sbi_trap_exit(regs: *mut sbi_trap::sbi_trap_regs) {
 	let scratch: *mut sbi_scratch = sbi_scratch_thishart_ptr();
-
-	((trap_exit_t)(*scratch).trap_exit)(regs);
+	let trap_exit_ptr: fn(*mut sbi_trap::sbi_trap_regs) = (*scratch).trap_exit;
+	trap_exit_ptr(regs);
 	unreachable!("Unreachable!");
 }
 
 pub fn sbi_tlb_request(hmask: usize, hbase: usize, tinfo: *mut sbi_tlb_info) -> i32
 {
 	if !(*tinfo).local_fn {
-		return ERROR::SBI_ERR_INVALID_PARAM;
+		return -3; // SBI_ERR_INVALID_PARAM
 	}
 
 	tlb_pmu_incr_fw_ctr(tinfo);
@@ -449,9 +456,9 @@ pub fn sbi_tlb_request(hmask: usize, hbase: usize, tinfo: *mut sbi_tlb_info) -> 
 	return sbi_ipi_send_many(hmask, hbase, tlb_event, tinfo);
 }
 
-fn bitmap_zero_except(dst: *mut usize, exception: usize, nbits: usize) {
-	if small_const_nbits(nbits) {
-		*dst = 0;
+fn bitmap_zero_except(dst: &[usize], exception: usize, nbits: usize) {
+	if nbits < Const::BITS_PER_LONG {
+		dst[0] = 0;
 	}
 	else {
 		let i: usize;
@@ -461,37 +468,35 @@ fn bitmap_zero_except(dst: *mut usize, exception: usize, nbits: usize) {
 		}
 	}
 	if exception < nbits {
-		__set_bit(exception, dst);
+		let val: usize = 1 << (exception % Const::BITS_PER_LONG);
+		dst[exception / Const::BITS_PER_LONG] |= val;
 	}
 }
 
 // /** Initialize hartmask to zero except a particular HART id */
 pub fn SBI_HARTMASK_INIT_EXCEPT(__m: sbi_hartmask, __h: usize)	{
-	bitmap_zero_except((__m).bits, __h, SBI_HARTMASK_MAX_BITS)
+	bitmap_zero_except(&(__m).bits, __h, SBI_HARTMASK_MAX_BITS)
 }
 
-// typedef struct {
-// 	#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-// 		   u16 next;
-// 		   u16 owner;
-// 	#else
-// 		   u16 owner;
-// 		   u16 next;
-// 	#endif
-// 	} __aligned(4) spinlock_t;
 	
-// 	pub const __SPIN_LOCK_UNLOCKED	\
-// 		(spinlock_t) { 0, 0 }
+fn __SPIN_LOCK_UNLOCKED() -> spinlock_t {
+	spinlock_t::new()
+}
 	
-// 	pub const SPIN_LOCK_INIT(x)	\
-// 		x = __SPIN_LOCK_UNLOCKED
-	
-// 	pub const SPIN_LOCK_INITIALIZER	\
-// 		__SPIN_LOCK_UNLOCKED
-	
-// 	pub const DEFINE_SPIN_LOCK(x)	\
-// 		spinlock_t SPIN_LOCK_INIT(x)\
+pub fn SPIN_LOCK_INIT(x: &mut spinlock_t) {	
+	*x = __SPIN_LOCK_UNLOCKED();
+}
 
+pub fn SPIN_LOCK_INITIALIZER() -> spinlock_t {
+	__SPIN_LOCK_UNLOCKED()
+}
+
+
+
+// qemu max hart id 
+fn sbi_platform_hart_count() -> usize {
+	8
+}
 
 /**
  * Get ulong HART mask for given HART base ID
@@ -501,10 +506,9 @@ pub fn SBI_HARTMASK_INIT_EXCEPT(__m: sbi_hartmask, __h: usize)	{
  * @return 0 on success and SBI_Exxx (< 0) on failure
  * Note: the output HART mask will be set to zero on failure as well.
  */
-pub fn sbi_hsm_hart_started_mask(scratch: sbi_scratch,
-	usize hbase, usize *out_hmask) -> i32 {
+pub fn sbi_hsm_hart_started_mask(hbase: usize, out_hmask: &mut usize) -> i32 {
 	let i: usize;
-	let hcount: usize = sbi_platform_hart_count(sbi_platform_ptr(scratch));
+	let hcount: usize = sbi_platform_hart_count();
   
 	/*
 	* The SBI_HARTMASK_MAX_BITS represents the maximum HART ids generic
@@ -518,15 +522,16 @@ pub fn sbi_hsm_hart_started_mask(scratch: sbi_scratch,
   
 	*out_hmask = 0;
 	if hcount <= hbase {
-		return SBI_EINVAL;
+		return -3; // SBI_ERR_INVALID_PARAM
 	}
-	if BITS_PER_LONG < (hcount - hbase) {
-		hcount = BITS_PER_LONG;
+	if Const::BITS_PER_LONG < (hcount - hbase) {
+		hcount = Const::BITS_PER_LONG;
 	}
   
-	for (i = hbase; i < hcount; i++) {
-	if (sbi_hsm_hart_get_state(scratch, i) == SBI_HART_STARTED)
-	*out_hmask |= 1UL << (i - hbase);
+	for i in hbase..hcount {
+		if HSM.hart_get_status(i) == HsmState::Started {
+			*out_hmask |= 1 << (i - hbase);
+		}
 	}
   
 	return 0;
