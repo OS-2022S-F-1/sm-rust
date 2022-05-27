@@ -68,6 +68,13 @@ pub static mut sm_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_K
 pub static mut sm_private_key: [u8;crypto::PRIVATE_KEY_SIZE] = [0;crypto::PRIVATE_KEY_SIZE];
 pub static mut dev_public_key: [u8;crypto::PUBLIC_KEY_SIZE] = [0;crypto::PUBLIC_KEY_SIZE];
 
+// /* from Sanctum BootROM */
+// extern sanctum_sm_hash[u8;MDSIZE];
+// extern sanctum_sm_signature[u8;SIGNATURE_SIZE];
+// extern sanctum_sm_secret_key[u8;PRIVATE_KEY_SIZE];
+// extern sanctum_sm_public_key[u8;PUBLIC_KEY_SIZE];
+// extern sanctum_dev_public_key[u8;PUBLIC_KEY_SIZE];
+
 unsafe fn any_as_u8_slice<T: Sized>(p: &T) -> &[u8] {
   ::std::slice::from_raw_parts(
       (p as *const T) as *const u8,
@@ -173,7 +180,7 @@ pub fn sm_derive_sealing_key(key: &mut [u8], key_ident: &[u8], key_ident_size: u
 }
 
 pub fn sm_sign(signature: &[u8], data: &[u8], len: usize) {
-  crypt::sign(, data, len, sm_public_key, sm_private_key);
+  crypto::sign(data, &sm_public_key, &sm_private_key);
 }
 
 fn sm_copy_key() {
@@ -194,67 +201,77 @@ fn sm_print_hash() {
   println!("\n");
 }
 
-// fn sm_init(cold_boot: bool) {
-// 	// initialize SM
-//   if cold_boot {
-//     /* only the cold-booting hart will execute these */
-//     // opensbi
-//     println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
+fn sm_init(cold_boot: bool) {
+	// initialize SM
+  if cold_boot {
+    /* only the cold-booting hart will execute these */
+    // opensbi
+    println!("[SM] Initializing ... hart {}\n", opensbi::csr_read("mhartid"));
 
-//     // opensbi
-//     opensbi::sbi_ecall_register_extension(&ecall_keystone_enclave);
+    // opensbi
+    // lib: Add dynamic registration of SBI extensions
 
-//     sm_region_id = smm_init();
-//     if sm_region_id < 0 {
-//       // opensbi
-//       println!("[SM] intolerable error - failed to initialize SM memory");
-//       opensbi::sbi_hart_hang();
-//     }
+    // This patch extends our SBI ecall implementation to allow
+    // dynamic registration of various SBI extensions. Using this
+    // dynamic registration we can break-up SBI ecall implementation
+    // into multiple files and even register experimental/custom
+    // SBI extensions from platform code.
 
-//     os_region_id = osm_init();
-//     if os_region_id < 0 {
-//       // opensbi
-//       println!("[SM] intolerable error - failed to initialize OS memory");
-//       opensbi::sbi_hart_hang();
-//     }
+    // Signed-off-by: Anup Patel <anup.patel@wdc.com>
+    // Reviewed-by: Atish Patra <atish.patra@wdc.com>
+    // opensbi::sbi_ecall_register_extension(&ecall_keystone_enclave);
 
-//     if platform::platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS {
-//       println!("[SM] platform global init fatal error");
-//       opensbi::sbi_hart_hang();
-//     }
-//     // Copy the keypair from the root of trust
-//     sm_copy_key();
+    sm_region_id = smm_init();
+    if sm_region_id < 0 {
+      // opensbi
+      println!("[SM] intolerable error - failed to initialize SM memory");
+      opensbi::sbi_hart_hang();
+    }
 
-//     // Init the enclave metadata
-//     enclave::enclave_init_metadata(); // enclave.rs
+    os_region_id = osm_init();
+    if os_region_id < 0 {
+      // opensbi
+      println!("[SM] intolerable error - failed to initialize OS memory");
+      opensbi::sbi_hart_hang();
+    }
 
-//     sm_init_done = 1;
-//     opensbi::mb(); // opensbi
-//   }
+    if platform::platform_init_global_once() != SBI_ERR_SM_ENCLAVE_SUCCESS {
+      println!("[SM] platform global init fatal error");
+      opensbi::sbi_hart_hang();
+    }
+    // Copy the keypair from the root of trust
+    sm_copy_key();
 
-//   /* wait until cold-boot hart finishes */
-//   while sm_init_done == 0 {
-//     opensbi::mb(); // opensbi
-//   }
+    // Init the enclave metadata
+    enclave::enclave_init_metadata(); // enclave.rs
 
-//   /* below are executed by all harts */
-//   pmp::pmp_init();
-//   pmp::pmp_set_keystone(sm_region_id, pmp::PMP_NO_PERM);
-//   pmp::pmp_set_keystone(os_region_id, pmp::PMP_ALL_PERM);
+    sm_init_done = 1;
+    opensbi::mb(); // opensbi
+  }
 
-//   /* Fire platform specific global init */
-//   if platform::platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
-//     // opensbi
-//     println!("[SM] platform global init fatal error");
-//     opensbi::sbi_hart_hang();
-//   }
+  /* wait until cold-boot hart finishes */
+  while sm_init_done == 0 {
+    opensbi::mb(); // opensbi
+  }
 
-//   // opensbi
-//   println!("[SM] Keystone security monitor has been initialized!\n");
+  /* below are executed by all harts */
+  pmp::pmp_init();
+  pmp::pmp_set_keystone(sm_region_id, pmp::PMP_NO_PERM);
+  pmp::pmp_set_keystone(os_region_id, pmp::PMP_ALL_PERM);
 
-//   sm_print_hash();
+  /* Fire platform specific global init */
+  if platform::platform_init_global() != ERROR::SBI_ERR_SM_ENCLAVE_SUCCESS {
+    // opensbi
+    println!("[SM] platform global init fatal error");
+    opensbi::sbi_hart_hang();
+  }
 
-//   return;
-//   // for debug
-//   // sm_print_cert();
-// }
+  // opensbi
+  println!("[SM] Keystone security monitor has been initialized!\n");
+
+  sm_print_hash();
+
+  return;
+  // for debug
+  // sm_print_cert();
+}

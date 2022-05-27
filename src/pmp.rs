@@ -520,7 +520,7 @@ pub fn pmp_set_global(region_idx: i32, perm: u8) -> i32 {
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index".to_string());
   }
 
-  ipi::send_and_sync_pmp_ipi(region_idx, ipi::SBI_PMP_IPI_TYPE_SET as i32, perm); // ipi.rs
+  // ipi::send_and_sync_pmp_ipi(region_idx, ipi::SBI_PMP_IPI_TYPE_SET as i32, perm); // ipi.rs
 
   return ERROR::SBI_ERR_SM_PMP_SUCCESS as i32;
 }
@@ -561,7 +561,7 @@ pub fn pmp_unset_global(region_idx: i32) -> i32 {
     PMP_ERROR(ERROR::SBI_ERR_SM_PMP_REGION_INVALID, "Invalid PMP region index".to_string());
   }
   
-  ipi::send_and_sync_pmp_ipi(region_idx, ipi::SBI_PMP_IPI_TYPE_UNSET as i32, PMP_NO_PERM);
+  // ipi::send_and_sync_pmp_ipi(region_idx, ipi::SBI_PMP_IPI_TYPE_UNSET as i32, PMP_NO_PERM);
 
   return ERROR::SBI_ERR_SM_PMP_SUCCESS as i32;
 }

@@ -1,4 +1,13 @@
 use crate::enclave;
+extern "C" {
+    fn copy_block_from_sm(a: usize, b: *const mprv_block) -> i32;
+    fn copy_word_from_sm(a: usize, b: *const usize) -> i32;
+    fn copy1_from_sm(a: usize, b: *const u8) -> i32;
+
+    fn copy_block_to_sm(dst: *const mprv_block, src: usize) -> i32;
+    fn copy_word_to_sm(dst: *const usize, src: usize) -> i32;
+    fn copy1_to_sm(dst: *const u8, src: usize) -> i32;
+}
 
 #[cfg(target_pointer_width = "32")]
 pub mod log {
@@ -23,37 +32,43 @@ pub fn copy_from_sm(dst: usize, src: usize, len: usize) -> i32 {
 
         if src % REGBYTES  == 0 && dst % REGBYTES == 0 {
             while len >= MPRV_BLOCK {
-                let res: i32 = copy_block_from_sm(dst, src as *const mprv_block); // mprv.s
-                if res != 0 {
-                    return res;
-                }
-    
-                src += MPRV_BLOCK;
-                dst += MPRV_BLOCK;
-                len -= MPRV_BLOCK;
+                unsafe {
+                    let res: i32 = copy_block_from_sm(dst, src as *const mprv_block); // mprv.s
+                    if res != 0 {
+                        return res;
+                    }
+        
+                    src += MPRV_BLOCK;
+                    dst += MPRV_BLOCK;
+                    len -= MPRV_BLOCK;
+                } 
             }
 
             while len >= REGBYTES {
-                let res: i32 = copy_word_from_sm(dst, src as *const usize); // mprv.s
-                if res != 0 {
-                    return res;
+                unsafe {
+                    let res: i32 = copy_word_from_sm(dst, src as *const usize); // mprv.s
+                    if res != 0 {
+                        return res;
+                    }
+        
+                    src += REGBYTES;
+                    dst += REGBYTES;
+                    len -= REGBYTES;
                 }
-    
-                src += REGBYTES;
-                dst += REGBYTES;
-                len -= REGBYTES;
             }
         }
     
         while len > 0 {
-            let res: i32 = copy1_from_sm(dst, src as *const u8); // mprv.s
-            if res != 0 {
-                return res;
+            unsafe {
+                let res: i32 = copy1_from_sm(dst, src as *const u8); // mprv.s
+                if res != 0 {
+                    return res;
+                }
+        
+                src += 1;
+                dst += 1;
+                len -= 1;
             }
-    
-            src += 1;
-            dst += 1;
-            len -= 1;
         }
         
         return 0;
@@ -66,37 +81,43 @@ pub fn copy_to_sm(dst: usize, src: usize, len: usize) -> i32 {
 
         if src % REGBYTES == 0 && dst % REGBYTES == 0 {
             while len >= MPRV_BLOCK {
-                let res: i32 = copy_block_to_sm(dst as *const mprv_block, src); // mprv.s
-                if res != 0 {
-                    return res;
+                unsafe {
+                    let res: i32 = copy_block_to_sm(dst as *const mprv_block, src); // mprv.s
+                    if res != 0 {
+                        return res;
+                    }
+        
+                    src += MPRV_BLOCK;
+                    dst += MPRV_BLOCK;
+                    len -= MPRV_BLOCK;
                 }
-    
-                src += MPRV_BLOCK;
-                dst += MPRV_BLOCK;
-                len -= MPRV_BLOCK;
             }
     
             while len >= REGBYTES {
-                let res: i32 = copy_word_to_sm(dst as *const usize, src); // mprv.s
-                if res != 0 {
-                    return res;
+                unsafe {
+                    let res: i32 = copy_word_to_sm(dst as *const usize, src); // mprv.s
+                    if res != 0 {
+                        return res;
+                    }
+        
+                    src += REGBYTES;
+                    dst += REGBYTES;
+                    len -= REGBYTES;
                 }
-    
-                src += REGBYTES;
-                dst += REGBYTES;
-                len -= REGBYTES;
             }
         }
     
         while len > 0 {
-            let res: i32 = copy1_to_sm(dst as *const u8, src);
-            if res != 0 {
-                return res;
+            unsafe {
+                let res: i32 = copy1_to_sm(dst as *const u8, src);
+                if res != 0 {
+                    return res;
+                }
+        
+                src += 1;
+                dst += 1;
+                len -= 1;
             }
-    
-            src += 1;
-            dst += 1;
-            len -= 1;
         }
     
         return 0;

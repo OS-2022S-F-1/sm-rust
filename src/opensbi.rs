@@ -323,11 +323,13 @@ pub fn current_hartid() -> usize {
 }
 
 pub fn sbi_hart_hang() {
-	use riscv::asm::wfi;
-	loop {
-		wfi();
+	unsafe {
+		use riscv::asm::wfi;
+		loop {
+			wfi();
+		}
+		unreachable!("Unreachable!");
 	}
-	unreachable!("Unreachable!");
 }
 
 pub fn sbi_memset(s: usize, c: u8, count: usize) -> usize {
@@ -397,37 +399,37 @@ struct sbi_scratch {
  * set to all online harts if the intention is to send IPIs to all the harts.
  * If hmask is zero, no IPIs will be sent.
  */
-fn sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data) -> i32 {
-	int rc;
-	ulong i, m;
-	struct sbi_domain *dom = sbi_domain_thishart_ptr();
-	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
+// fn sbi_ipi_send_many(ulong hmask, ulong hbase, u32 event, void *data) -> i32 {
+// 	int rc;
+// 	ulong i, m;
+// 	struct sbi_domain *dom = sbi_domain_thishart_ptr();
+// 	struct sbi_scratch *scratch = sbi_scratch_thishart_ptr();
 
-	if (hbase != -1UL) {
-		rc = sbi_hsm_hart_interruptible_mask(dom, hbase, &m);
-		if (rc)
-			return rc;
-		m &= hmask;
+// 	if (hbase != -1UL) {
+// 		rc = sbi_hsm_hart_interruptible_mask(dom, hbase, &m);
+// 		if (rc)
+// 			return rc;
+// 		m &= hmask;
 
-		/* Send IPIs */
-		for (i = hbase; m; i++, m >>= 1) {
-			if (m & 1UL)
-				sbi_ipi_send(scratch, i, event, data);
-		}
-	} else {
-		hbase = 0;
-		while (!sbi_hsm_hart_interruptible_mask(dom, hbase, &m)) {
-			/* Send IPIs */
-			for (i = hbase; m; i++, m >>= 1) {
-				if (m & 1UL)
-					sbi_ipi_send(scratch, i, event, data);
-			}
-			hbase += BITS_PER_LONG;
-		}
-	}
+// 		/* Send IPIs */
+// 		for (i = hbase; m; i++, m >>= 1) {
+// 			if (m & 1UL)
+// 				sbi_ipi_send(scratch, i, event, data);
+// 		}
+// 	} else {
+// 		hbase = 0;
+// 		while (!sbi_hsm_hart_interruptible_mask(dom, hbase, &m)) {
+// 			/* Send IPIs */
+// 			for (i = hbase; m; i++, m >>= 1) {
+// 				if (m & 1UL)
+// 					sbi_ipi_send(scratch, i, event, data);
+// 			}
+// 			hbase += BITS_PER_LONG;
+// 		}
+// 	}
 
-	return 0;
-}
+// 	return 0;
+// }
 
 /**
  * Exit trap/interrupt handling
@@ -445,16 +447,16 @@ pub fn sbi_trap_exit(regs: *mut sbi_trap::sbi_trap_regs) {
 	unreachable!("Unreachable!");
 }
 
-pub fn sbi_tlb_request(hmask: usize, hbase: usize, tinfo: *mut sbi_tlb_info) -> i32
-{
-	if !(*tinfo).local_fn {
-		return -3; // SBI_ERR_INVALID_PARAM
-	}
+// pub fn sbi_tlb_request(hmask: usize, hbase: usize, tinfo: *mut sbi_tlb_info) -> i32
+// {
+// 	if !(*tinfo).local_fn {
+// 		return -3; // SBI_ERR_INVALID_PARAM
+// 	}
 
-	tlb_pmu_incr_fw_ctr(tinfo);
+// 	tlb_pmu_incr_fw_ctr(tinfo);
 
-	return sbi_ipi_send_many(hmask, hbase, tlb_event, tinfo);
-}
+// 	return sbi_ipi_send_many(hmask, hbase, tlb_event, tinfo);
+// }
 
 fn bitmap_zero_except(dst: &[usize], exception: usize, nbits: usize) {
 	if nbits < Const::BITS_PER_LONG {
@@ -537,23 +539,23 @@ pub fn sbi_hsm_hart_started_mask(hbase: usize, out_hmask: &mut usize) -> i32 {
 	return 0;
 }
 
-pub fn sbi_ecall_register_extension(struct sbi_ecall_extension *ext) -> i32 {
-	struct sbi_ecall_extension *t;
+// pub fn sbi_ecall_register_extension(struct sbi_ecall_extension *ext) -> i32 {
+// 	struct sbi_ecall_extension *t;
 
-	if (!ext || (ext->extid_end < ext->extid_start) || !ext->handle)
-		return SBI_EINVAL;
+// 	if (!ext || (ext->extid_end < ext->extid_start) || !ext->handle)
+// 		return SBI_EINVAL;
 
-	sbi_list_for_each_entry(t, &ecall_exts_list, head) {
-		unsigned long start = t->extid_start;
-		unsigned long end = t->extid_end;
-		if (end < ext->extid_start || ext->extid_end < start)
-			/* no overlap */;
-		else
-			return SBI_EINVAL;
-	}
+// 	sbi_list_for_each_entry(t, &ecall_exts_list, head) {
+// 		unsigned long start = t->extid_start;
+// 		unsigned long end = t->extid_end;
+// 		if (end < ext->extid_start || ext->extid_end < start)
+// 			/* no overlap */;
+// 		else
+// 			return SBI_EINVAL;
+// 	}
 
-	SBI_INIT_LIST_HEAD(&ext->head);
-	sbi_list_add_tail(&ext->head, &ecall_exts_list);
+// 	SBI_INIT_LIST_HEAD(&ext->head);
+// 	sbi_list_add_tail(&ext->head, &ecall_exts_list);
 
-	return 0;
-}
+// 	return 0;
+// }
