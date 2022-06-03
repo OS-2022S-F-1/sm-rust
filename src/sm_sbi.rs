@@ -43,7 +43,7 @@ fn sbi_sm_exit_enclave(regs: &mut sbi_trap::sbi_trap_regs, retval: usize) -> usi
     0
 }
 
-fn sbi_sm_stop_enclave(regs: &mut sbi_trap::sbi_trap_regs, request: usize) -> usize {
+pub fn sbi_sm_stop_enclave(regs: &mut sbi_trap::sbi_trap_regs, request: usize) -> usize {
     regs.a0 = enclave::stop_enclave(regs, request, cpu::cpu_get_enclave_id()); // enclave.rs
     regs.mepc += 4;
     opensbi::sbi_trap_exit(regs); // opensbi 提供函数

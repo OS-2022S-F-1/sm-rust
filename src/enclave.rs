@@ -27,7 +27,7 @@ const ENCLAVE_REGIONS_MAX: usize = 8;
 const MAX_ENCL_THREADS: usize = 1;
 const ENCL_MAX: usize = 16;
 
-const STOP_TIMER_INTERRUPT: usize = 0;
+pub const STOP_TIMER_INTERRUPT: usize = 0;
 const STOP_EDGE_CALL_HOST: usize = 1;
 const STOP_EXIT_ENCLAVE: usize = 2;
 

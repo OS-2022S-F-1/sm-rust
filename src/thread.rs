@@ -141,7 +141,7 @@ pub fn switch_vector_host() { // ?
 
 pub fn switch_vector_enclave() {
   // opensbi
-  extern void trap_vector_enclave();
+  extern trap_vector_enclave();
   csr_write("mtvec", &trap_vector_enclave);
 }
 

@@ -15,6 +15,7 @@ mod ipi;
 mod assert;
 mod opensbi;
 mod sbi_trap;
+mod sbi_trap_hack;
 
 fn main() {
     println!("hello world");
