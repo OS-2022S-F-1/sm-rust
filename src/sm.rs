@@ -184,8 +184,6 @@ pub fn sm_sign(signature: &[u8], data: &[u8], len: usize) {
 }
 
 fn sm_copy_key() {
-  // opensbi
-
   opensbi::sbi_memcpy(&sm_hash as *const u8 as usize, sanctum_sm_hash, crypto::MDSIZE);
   opensbi::sbi_memcpy(&sm_signature as *const u8 as usize, sanctum_sm_signature, crypto::SIGNATURE_SIZE);
   opensbi::sbi_memcpy(&sm_public_key as *const u8 as usize, sanctum_sm_public_key, crypto::PUBLIC_KEY_SIZE);

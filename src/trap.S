@@ -2,13 +2,6 @@
 #include <sbi/riscv_encoding.h>
 #include <sbi/riscv_asm.h>
 #include <sbi/sbi_scratch.h>
-
-#define CSR_MSCRATCH 0x340
-#define SBI_SCRATCH_TMP0_OFFSET			(9 * __SIZEOF_POINTER__)
-#define CSR_MSTATUS			0x300
-#define MSTATUS_MPP_SHIFT		11
-#define PRV_M				_UL(3)
-
   .option norvc
   .section .text.init,"ax",@progbits
   .globl trap_vector_enclave
@@ -60,6 +53,15 @@ trap_vector_enclave:
     csrr    t0, CSR_MSTATUS
     REG_S    t0, SBI_TRAP_REGS_OFFSET(mstatus)(sp)
     REG_S    zero, SBI_TRAP_REGS_OFFSET(mstatusH)(sp)
+#if __riscv_xlen == 32
+    csrr    t0, CSR_MISA
+    srli    t0, t0, ('H' - 'A')
+    andi    t0, t0, 0x1
+    beq    t0, zero, _skip_mstatush_save
+    csrr    t0, CSR_MSTATUSH
+    REG_S    t0, SBI_TRAP_REGS_OFFSET(mstatusH)(sp)
+_skip_mstatush_save:
+#endif
 
     /* Save all general regisers except SP and T0 */
     REG_S    zero, SBI_TRAP_REGS_OFFSET(zero)(sp)
@@ -133,6 +135,15 @@ trap_vector_enclave:
     csrw    CSR_MEPC, t0
     REG_L    t0, SBI_TRAP_REGS_OFFSET(mstatus)(sp)
     csrw    CSR_MSTATUS, t0
+#if __riscv_xlen == 32
+    csrr    t0, CSR_MISA
+    srli    t0, t0, ('H' - 'A')
+    andi    t0, t0, 0x1
+    beq    t0, zero, _skip_mstatush_restore
+    REG_L    t0, SBI_TRAP_REGS_OFFSET(mstatusH)(sp)
+    csrw    CSR_MSTATUSH, t0
+_skip_mstatush_restore:
+#endif
 
     /* Restore T0 */
     REG_L    t0, SBI_TRAP_REGS_OFFSET(t0)(sp)

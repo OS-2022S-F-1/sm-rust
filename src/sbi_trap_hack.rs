@@ -74,45 +74,37 @@ pub fn sbi_trap_handler_keystone_enclave(regs: &mut sbi_trap::sbi_trap_regs) {
 				sm_sbi::sbi_sm_stop_enclave(regs, enclave::STOP_TIMER_INTERRUPT);
 				regs.a0 = ERROR::SBI_ERR_SM_ENCLAVE_INTERRUPTED;
 				regs.mepc += 4;
-			},
-			_ => {
-				msg = "unhandled external interrupt";
-				sbi_trap_error(msg, rc, mcause, mtval, mtval2, mtinst, regs);
 			}
 		}
 		return;
 	}
 
-	match mcause {
-		CAUSE_ILLEGAL_INSTRUCTION => {
-			rc  = sbi_illegal_insn_handler(mtval, regs);
-			msg = "illegal instruction handler failed";
-		}
-	case CAUSE_MISALIGNED_LOAD:
-		rc = sbi_misaligned_load_handler(mtval, mtval2, mtinst, regs);
-		msg = "misaligned load handler failed";
-		break;
-	case CAUSE_MISALIGNED_STORE:
-		rc  = sbi_misaligned_store_handler(mtval, mtval2, mtinst, regs);
-		msg = "misaligned store handler failed";
-		break;
-	case CAUSE_SUPERVISOR_ECALL:
-	case CAUSE_MACHINE_ECALL:
-		rc  = sbi_ecall_handler(regs);
-		msg = "ecall handler failed";
-		break;
-	default:
-		/* If the trap came from S or U mode, redirect it there */
-		trap.epc = regs->mepc;
-		trap.cause = mcause;
-		trap.tval = mtval;
-		trap.tval2 = mtval2;
-		trap.tinst = mtinst;
-		rc = sbi_trap_redirect(regs, &trap);
-		break;
-	};
-
-trap_error:
-	if (rc)
-		sbi_trap_error(msg, rc, mcause, mtval, mtval2, mtinst, regs);
+	// match mcause {
+	// 	CAUSE_ILLEGAL_INSTRUCTION => {
+	// 		rc  = sbi_illegal_insn_handler(mtval, regs);
+	// 		msg = "illegal instruction handler failed";
+	// 	}
+	// case CAUSE_MISALIGNED_LOAD:
+	// 	rc = sbi_misaligned_load_handler(mtval, mtval2, mtinst, regs);
+	// 	msg = "misaligned load handler failed";
+	// 	break;
+	// case CAUSE_MISALIGNED_STORE:
+	// 	rc  = sbi_misaligned_store_handler(mtval, mtval2, mtinst, regs);
+	// 	msg = "misaligned store handler failed";
+	// 	break;
+	// case CAUSE_SUPERVISOR_ECALL:
+	// case CAUSE_MACHINE_ECALL:
+	// 	rc  = sbi_ecall_handler(regs);
+	// 	msg = "ecall handler failed";
+	// 	break;
+	// default:
+	// 	/* If the trap came from S or U mode, redirect it there */
+	// 	trap.epc = regs->mepc;
+	// 	trap.cause = mcause;
+	// 	trap.tval = mtval;
+	// 	trap.tval2 = mtval2;
+	// 	trap.tinst = mtinst;
+	// 	rc = sbi_trap_redirect(regs, &trap);
+	// 	break;
+	// };
 }

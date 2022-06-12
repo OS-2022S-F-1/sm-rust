@@ -1,6 +1,12 @@
 use crate::opensbi;
 use crate::sbi_trap;
 
+#[link(name = "trap")]
+extern "C" {
+  fn _trap_handler();
+  fn trap_vector_enclave();
+}
+
 pub struct thread_state {
   prev_mpp: i32,
   prev_mepc: usize,
@@ -134,15 +140,16 @@ impl csrs {
   }
 }
 
-pub fn switch_vector_host() { // ?
-  extern void _trap_handler();
-  csr_write("mtvec", &_trap_handler);
+pub fn switch_vector_host() {
+  unsafe {
+    opensbi::csr_write("mtvec", &_trap_handler as *const _ as usize);
+  }
 }
 
 pub fn switch_vector_enclave() {
-  // opensbi
-  extern trap_vector_enclave();
-  csr_write("mtvec", &trap_vector_enclave);
+  unsafe {
+    opensbi::csr_write("mtvec", &trap_vector_enclave as *const _ as usize);
+  }
 }
 
 pub fn swap_prev_mepc(thread: &mut thread_state, regs: &mut sbi_trap::sbi_trap_regs, current_mepc: usize) {
